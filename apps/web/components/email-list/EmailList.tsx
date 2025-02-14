@@ -180,6 +180,14 @@ export function EmailList({
   const session = useSession();
   // if right panel is open
   const [openThreadId, setOpenThreadId] = useQueryState("thread-id");
+
+  const toggleThread = useCallback(
+    (threadId: string) => {
+      setOpenThreadId((current) => (current === threadId ? null : threadId));
+    },
+    [setOpenThreadId],
+  );
+
   const closePanel = useCallback(
     () => setOpenThreadId(null),
     [setOpenThreadId],
@@ -239,27 +247,31 @@ export function EmailList({
             snippet: thread.snippet,
             threadId: message.threadId,
             messageId: message.id,
-            internalDate: message.internalDate || "",
+            internalDate: message.internalDate
+              ? message.internalDate.toString()
+              : new Date().toISOString(),
           });
 
           if (isActionError(result)) {
             setIsCategorizing((s) => ({ ...s, [thread.id]: false }));
-            throw new Error("There was an error categorizing the email.");
+            throw new Error(result.error);
           }
-          if (!result) {
-            throw new Error("The request did not complete");
+          if (!result?.category) {
+            setIsCategorizing((s) => ({ ...s, [thread.id]: false }));
+            throw new Error("Could not determine a category for this email");
           }
           // setCategory(res);
           refetch();
           setIsCategorizing((s) => ({ ...s, [thread.id]: false }));
 
-          return result?.category;
+          return result.category;
         },
         {
           loading: "Categorizing...",
           success: (category) =>
             `Categorized as ${capitalCase(category || "Unknown")}!`,
-          error: "There was an error categorizing the email :(",
+          error: (err) =>
+            err.message || "There was an error categorizing the email :(",
         },
       );
     },
@@ -482,13 +494,15 @@ export function EmailList({
               ref={listRef}
             >
               {threads.map((thread) => {
-                const onOpen = () => {
-                  const alreadyOpen = !!openThreadId;
-                  setOpenThreadId(thread.id);
-
-                  if (!alreadyOpen) scrollToId(thread.id);
-
-                  markReadThreads([thread.id], () => refetch());
+                const onToggle = () => {
+                  const isCurrentlyOpen = openThreadId === thread.id;
+                  if (isCurrentlyOpen) {
+                    setOpenThreadId(null);
+                  } else {
+                    setOpenThreadId(thread.id);
+                    scrollToId(thread.id);
+                    markReadThreads([thread.id], () => refetch());
+                  }
                 };
 
                 return (
@@ -509,7 +523,7 @@ export function EmailList({
                     selected={selectedRows[thread.id]}
                     onSelected={onSetSelectedRow}
                     splitView={!!openThreadId}
-                    onClick={onOpen}
+                    onClick={onToggle}
                     isCategorizing={isCategorizing[thread.id]}
                     onPlanAiAction={onPlanAiAction}
                     onAiCategorize={onAiCategorize}

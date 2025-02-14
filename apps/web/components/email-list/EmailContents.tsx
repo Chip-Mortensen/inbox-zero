@@ -1,37 +1,116 @@
 import { type SyntheticEvent, useCallback, useMemo, useState } from "react";
 import { Loading } from "@/components/Loading";
+import { Button } from "@/components/ui/button";
+import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
+import { cn } from "@/utils";
+
+function CollapsibleQuotedContent({ html }: { html: string }) {
+  const [isCollapsed, setIsCollapsed] = useState(true);
+  const srcDoc = useMemo(() => getIframeHtml(html), [html]);
+
+  return (
+    <div className="mt-4 border-l-2 border-gray-200 pl-4">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mb-2 h-6 text-xs text-gray-500 hover:text-gray-700"
+        onClick={() => setIsCollapsed(!isCollapsed)}
+      >
+        {isCollapsed ? (
+          <>
+            <ChevronDownIcon className="mr-1 h-3 w-3" />
+            Show quoted content
+          </>
+        ) : (
+          <>
+            <ChevronUpIcon className="mr-1 h-3 w-3" />
+            Hide quoted content
+          </>
+        )}
+      </Button>
+      <div
+        className={cn(
+          "overflow-hidden transition-all duration-200",
+          isCollapsed ? "max-h-0" : "max-h-[5000px]",
+        )}
+      >
+        <iframe
+          srcDoc={srcDoc}
+          className="h-auto min-h-0 w-full"
+          title="Quoted email content"
+          onLoad={(event) => {
+            if (event.currentTarget.contentWindow) {
+              const height =
+                event.currentTarget.contentWindow.document.documentElement
+                  .scrollHeight;
+              event.currentTarget.style.height = `${height + 5}px`;
+            }
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export function HtmlEmail({ html }: { html: string }) {
-  const srcDoc = useMemo(() => getIframeHtml(html), [html]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const onLoad = useCallback(
-    (event: SyntheticEvent<HTMLIFrameElement, Event>) => {
-      if (event.currentTarget.contentWindow) {
-        // sometimes we see minimal scrollbar, so add a buffer
-        const BUFFER = 5;
+  // Split the HTML into main content and quoted parts
+  const { mainContent, quotedParts } = useMemo(() => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
 
-        const height = `${
-          event.currentTarget.contentWindow.document.documentElement
-            .scrollHeight + BUFFER
-        }px`;
+    // Extract blockquotes
+    const quotes = Array.from(doc.querySelectorAll("blockquote"));
+    quotes.forEach((quote) => quote.remove());
 
-        event.currentTarget.style.height = height;
-        setIsLoading(false);
-      }
-    },
-    [],
-  );
+    // Look for email quote patterns
+    const content = doc.body.innerHTML;
+    const parts = content.split(/(On .+wrote:)/g);
+
+    if (parts.length > 1) {
+      // First part is the main content
+      const mainHtml = parts[0];
+
+      // Rest are quoted parts
+      const quotedHtml = parts.slice(1).join("");
+
+      return {
+        mainContent: mainHtml,
+        quotedParts: [...quotes.map((q) => q.outerHTML), quotedHtml].filter(
+          Boolean,
+        ),
+      };
+    }
+
+    return {
+      mainContent: parts[0],
+      quotedParts: quotes.map((q) => q.outerHTML),
+    };
+  }, [html]);
+
+  const mainSrcDoc = useMemo(() => getIframeHtml(mainContent), [mainContent]);
 
   return (
     <div>
       {isLoading && <Loading />}
       <iframe
-        srcDoc={srcDoc}
-        onLoad={onLoad}
+        srcDoc={mainSrcDoc}
+        onLoad={(event) => {
+          if (event.currentTarget.contentWindow) {
+            const height =
+              event.currentTarget.contentWindow.document.documentElement
+                .scrollHeight;
+            event.currentTarget.style.height = `${height + 5}px`;
+            setIsLoading(false);
+          }
+        }}
         className="h-0 min-h-0 w-full"
         title="Email content preview"
       />
+      {quotedParts.map((quotedHtml, index) => (
+        <CollapsibleQuotedContent key={index} html={quotedHtml} />
+      ))}
     </div>
   );
 }

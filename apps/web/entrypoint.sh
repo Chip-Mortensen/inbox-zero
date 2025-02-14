@@ -1,5 +1,15 @@
-#!/bin/bash
+#!/bin/sh
 
+# Install dependencies
 pnpm install
-pnpm prisma migrate dev
-pnpm run dev 
+
+# Wait for database to be ready
+echo "Waiting for database to be ready..."
+sleep 5
+
+# Run migrations
+pnpm prisma generate
+pnpm prisma migrate deploy
+
+# Start the application
+pnpm run dev

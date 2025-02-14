@@ -46,20 +46,35 @@ export const categorizeEmailAction = withActionInstrumentation(
       date: internalDateToDate(data.internalDate),
     });
 
-    const res = await categorize(
-      {
-        ...data,
-        content,
-        snippet: data.snippet || truncate(content, 300),
-        aiApiKey: user.aiApiKey,
-        aiProvider: user.aiProvider,
-        aiModel: user.aiModel,
-        unsubscribeLink,
-        hasPreviousEmail,
-      },
-      { email: u.email },
-    );
+    try {
+      const res = await categorize(
+        {
+          ...data,
+          content,
+          snippet: data.snippet || truncate(content, 300),
+          aiApiKey: user.aiApiKey,
+          aiProvider: user.aiProvider,
+          aiModel: user.aiModel,
+          unsubscribeLink,
+          hasPreviousEmail,
+        },
+        { email: u.email },
+      );
 
-    return { category: res?.category };
+      if (!res?.category) {
+        return {
+          error:
+            "Could not determine a category for this email. Please try again.",
+        };
+      }
+
+      return { category: res.category };
+    } catch (error) {
+      console.error("Error categorizing email:", error);
+      return {
+        error:
+          error instanceof Error ? error.message : "Failed to categorize email",
+      };
+    }
   },
 );

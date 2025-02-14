@@ -60,6 +60,11 @@ const NEXT_PUBLIC_DISABLE_TINYBIRD = env.NEXT_PUBLIC_DISABLE_TINYBIRD;
 
 const navigationItems: NavItem[] = [
   {
+    name: "Mail",
+    href: "/mail",
+    icon: MailsIcon,
+  },
+  {
     name: "AI Personal Assistant",
     href: "/automation",
     icon: SparklesIcon,

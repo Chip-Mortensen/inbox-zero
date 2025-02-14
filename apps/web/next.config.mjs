@@ -28,6 +28,36 @@ const nextConfig = {
       },
     },
   },
+  webpack: (config, { dev, isServer }) => {
+    // Optimize production builds
+    if (!dev) {
+      config.optimization = {
+        ...config.optimization,
+        moduleIds: "deterministic",
+        splitChunks: {
+          chunks: "all",
+          cacheGroups: {
+            tremor: {
+              test: /[\\/]node_modules[\\/](@tremor)[\\/]/,
+              name: "tremor",
+              chunks: "all",
+            },
+            charts: {
+              test: /[\\/]node_modules[\\/](chart\.js|react-chartjs-2)[\\/]/,
+              name: "charts",
+              chunks: "all",
+            },
+            commons: {
+              test: /[\\/]node_modules[\\/]/,
+              name: "vendors",
+              chunks: "all",
+            },
+          },
+        },
+      };
+    }
+    return config;
+  },
   pageExtensions: ["js", "jsx", "mdx", "ts", "tsx"],
   images: {
     remotePatterns: [

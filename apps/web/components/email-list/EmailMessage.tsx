@@ -64,14 +64,27 @@ export function EmailMessage({
     setShowDetails((prev) => !prev);
   }, []);
 
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      // Don't toggle if clicking on a button or link
+      if (
+        e.target instanceof HTMLElement &&
+        (e.target.closest("button") || e.target.closest("a"))
+      ) {
+        return;
+      }
+      onExpand();
+    },
+    [onExpand],
+  );
+
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: <explanation>
     <li
       className={cn(
         "bg-white p-4 shadow sm:rounded-lg",
-        !expanded && "cursor-pointer",
+        !expanded ? "cursor-pointer" : "cursor-default",
       )}
-      onClick={onExpand}
+      onClick={handleClick}
     >
       <TopBar
         message={message}

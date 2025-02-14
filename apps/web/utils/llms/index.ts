@@ -273,16 +273,24 @@ async function chatCompletionToolsInternal({
   try {
     const { provider, model, llmModel } = getModel(userAi);
 
-    const result = await generateText({
-      model: llmModel,
-      tools,
-      toolChoice: "required",
-      system,
-      prompt,
-      messages,
-      maxSteps,
-      experimental_telemetry: { isEnabled: true },
+    // Add a timeout of 30 seconds
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("Request timed out")), 30000);
     });
+
+    const result = await Promise.race([
+      generateText({
+        model: llmModel,
+        tools,
+        toolChoice: "required",
+        system,
+        prompt,
+        messages,
+        maxSteps,
+        experimental_telemetry: { isEnabled: true },
+      }),
+      timeoutPromise,
+    ]);
 
     if (result.usage) {
       await saveAiUsage({

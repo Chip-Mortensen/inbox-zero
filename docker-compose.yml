@@ -50,11 +50,28 @@ services:
       - ${WEB_PORT:-3000}:3000
     networks:
       - inbox-zero-network
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-inboxzero}?schema=public"
       DIRECT_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-inboxzero}?schema=public"
       UPSTASH_REDIS_URL: "http://serverless-redis-http:80"
       UPSTASH_REDIS_TOKEN: "${UPSTASH_REDIS_TOKEN}"
+      NODE_ENV: "development"
+      NODE_OPTIONS: "--max-old-space-size=8192 --max-semi-space-size=512 --v8-pool-size=8"
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_WEBPACK_MEMORY_LIMIT: 8192
+      TURBO_CACHE_DIR: ".turbo"
+    deploy:
+      resources:
+        limits:
+          cpus: '6'
+          memory: 12G
+        reservations:
+          cpus: '3'
+          memory: 6G
 
 volumes:
   database-data:

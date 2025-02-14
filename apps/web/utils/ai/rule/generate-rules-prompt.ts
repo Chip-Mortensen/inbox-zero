@@ -17,11 +17,11 @@ const parametersSnippets = z.object({
     .array(
       z.object({
         rule: z.string().describe("The rule to apply to the email"),
-        snippet: z
-          .string()
+        snippetIndex: z
+          .number()
           .optional()
           .describe(
-            "Optional: Include ONLY if this is a snippet-based rule. The exact snippet text this rule is based on.",
+            "Optional: Include ONLY if this is a snippet-based rule. The index of the snippet in the provided snippets array (0-based).",
           ),
       }),
     )
@@ -40,9 +40,7 @@ export async function aiGenerateRulesPrompt({
   snippets: string[];
 }): Promise<string[]> {
   const labelsList = userLabels
-    ? userLabels
-        .map((label) => `<label><name>${label}</name></label>`)
-        .join("\n")
+    ? userLabels.map((label) => `<label><n>${label}</n></label>`).join("\n")
     : "No labels found";
 
   const hasSnippets = snippets.length > 0;
@@ -68,7 +66,7 @@ ${lastSentEmails
 ${
   hasSnippets
     ? `<user_snippets>\n${snippets
-        .map((snippet) => `<snippet>\n${snippet}\n</snippet>`)
+        .map((snippet, i) => `<snippet index="${i}">\n${snippet}\n</snippet>`)
         .join("\n")}\n</user_snippets>`
     : ""
 }
@@ -99,7 +97,7 @@ Focus on creating rules that will help the user organize their inbox more effici
 6. Dealing with newsletters, marketing emails, and potential spam
 ${
   hasSnippets
-    ? "7. Add a rule for each snippet. IMPORTANT: Include the full text of the snippet in your output. The output can be multiple paragraphs long when using snippets."
+    ? "7. For each snippet, create a rule that references the snippet by its index. Do not include the full snippet text in your response."
     : ""
 }
 
@@ -127,14 +125,22 @@ Your response should only include the list of general rules. Aim for 3-10 broadl
 
   logger.trace("Args", { args });
 
-  return parseRulesResponse(args, hasSnippets);
+  return parseRulesResponse(args, hasSnippets, snippets);
 }
 
-function parseRulesResponse(args: unknown, hasSnippets: boolean): string[] {
+function parseRulesResponse(
+  args: unknown,
+  hasSnippets: boolean,
+  snippets: string[],
+): string[] {
   if (hasSnippets) {
     const parsedRules = args as z.infer<typeof parametersSnippets>;
-    return parsedRules.rules.map(({ rule, snippet }) =>
-      snippet ? `${rule}\n---\n${snippet}\n---\n` : rule,
+    return parsedRules.rules.map(({ rule, snippetIndex }) =>
+      snippetIndex !== undefined &&
+      snippetIndex >= 0 &&
+      snippetIndex < snippets.length
+        ? `${rule}\n---\n${snippets[snippetIndex]}\n---\n`
+        : rule,
     );
   }
 
