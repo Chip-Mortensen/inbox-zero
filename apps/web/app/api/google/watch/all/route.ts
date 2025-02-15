@@ -43,7 +43,13 @@ async function watchAllEmails() {
     },
   });
 
-  logger.info("Found premium users", { count: premiums.length });
+  logger.info("Found premium users", {
+    count: premiums.length,
+    usersWithAccounts: premiums.filter((p) =>
+      p.users.some((u) => u.accounts.length > 0),
+    ).length,
+    totalUsers: premiums.reduce((acc, p) => acc + p.users.length, 0),
+  });
 
   const users = premiums
     .flatMap((premium) => premium.users.map((user) => ({ ...user, premium })))
@@ -60,7 +66,12 @@ async function watchAllEmails() {
       return 0;
     });
 
-  logger.info("Processing users", { totalUsers: users.length });
+  logger.info("Processing users", {
+    totalUsers: users.length,
+    usersWithWatchExpiration: users.filter((u) => u.watchEmailsExpirationDate)
+      .length,
+    usersWithAccounts: users.filter((u) => u.accounts.length > 0).length,
+  });
 
   for (const user of users) {
     try {
@@ -68,6 +79,10 @@ async function watchAllEmails() {
         email: user.email,
         hasWatchExpiration: !!user.watchEmailsExpirationDate,
         watchExpiration: user.watchEmailsExpirationDate,
+        hasAccounts: user.accounts.length > 0,
+        accountsWithTokens: user.accounts.filter(
+          (a) => a.access_token && a.refresh_token,
+        ).length,
       });
 
       const userHasAiAccess = hasAiAccess(
@@ -83,17 +98,26 @@ async function watchAllEmails() {
         email: user.email,
         hasAiAccess: userHasAiAccess,
         hasColdEmailAccess: userHasColdEmailAccess,
+        aiAutomationAccess: user.premium.aiAutomationAccess,
+        coldEmailBlockerAccess: user.premium.coldEmailBlockerAccess,
+        hasApiKey: !!user.aiApiKey,
       });
 
       if (!userHasAiAccess && !userHasColdEmailAccess) {
         logger.info("User does not have required access", {
           email: user.email,
+          aiAutomationAccess: user.premium.aiAutomationAccess,
+          coldEmailBlockerAccess: user.premium.coldEmailBlockerAccess,
+          hasApiKey: !!user.aiApiKey,
         });
         if (
           user.watchEmailsExpirationDate &&
           new Date(user.watchEmailsExpirationDate) < new Date()
         ) {
-          logger.info("Updating expired watch date", { email: user.email });
+          logger.info("Updating expired watch date", {
+            email: user.email,
+            watchExpiration: user.watchEmailsExpirationDate,
+          });
           await prisma.user.update({
             where: { id: user.id },
             data: { watchEmailsExpirationDate: null },
@@ -109,11 +133,24 @@ async function watchAllEmails() {
           email: user.email,
           hasAccessToken: !!account?.access_token,
           hasRefreshToken: !!account?.refresh_token,
+          accountId: account?.providerAccountId,
+          expiryDate: account?.expires_at
+            ? new Date(account.expires_at).toISOString()
+            : null,
         });
         continue;
       }
 
-      logger.info("Getting Gmail client", { email: user.email });
+      logger.info("Getting Gmail client", {
+        email: user.email,
+        accountId: account.providerAccountId,
+        hasAccessToken: !!account.access_token,
+        hasRefreshToken: !!account.refresh_token,
+        expiryDate: account.expires_at
+          ? new Date(account.expires_at).toISOString()
+          : null,
+      });
+
       const gmail = await getGmailClientWithRefresh(
         {
           accessToken: account.access_token,
@@ -124,18 +161,31 @@ async function watchAllEmails() {
       );
 
       if (!gmail) {
-        logger.error("Failed to get Gmail client", { email: user.email });
+        logger.error("Failed to get Gmail client", {
+          email: user.email,
+          accountId: account.providerAccountId,
+        });
         continue;
       }
 
-      logger.info("Watching emails for user", { email: user.email });
+      logger.info("Watching emails for user", {
+        email: user.email,
+        accountId: account.providerAccountId,
+      });
+
       await watchEmails(user.id, gmail);
-      logger.info("Successfully set up watch for user", { email: user.email });
+
+      logger.info("Successfully set up watch for user", {
+        email: user.email,
+        accountId: account.providerAccountId,
+      });
     } catch (error) {
       logger.error("Error processing user", {
         userId: user.id,
         email: user.email,
         error: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        accountId: user.accounts[0]?.providerAccountId,
       });
     }
   }
