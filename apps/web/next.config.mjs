@@ -35,7 +35,7 @@ const nextConfig = {
         ...config.optimization,
         moduleIds: "deterministic",
         splitChunks: {
-          chunks: "all",
+          chunks: isServer ? "all" : "initial",
           cacheGroups: {
             tremor: {
               test: /[\\/]node_modules[\\/](@tremor)[\\/]/,
@@ -49,8 +49,9 @@ const nextConfig = {
             },
             commons: {
               test: /[\\/]node_modules[\\/]/,
-              name: "vendors",
+              name: isServer ? false : "vendors",
               chunks: "all",
+              minChunks: 2,
             },
           },
         },
