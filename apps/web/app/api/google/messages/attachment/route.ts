@@ -5,9 +5,6 @@ import { withError } from "@/utils/middleware";
 import { getGmailAttachment } from "@/utils/gmail/attachment";
 import { getGmailClient } from "@/utils/gmail/client";
 
-export const dynamic = "force-dynamic";
-export const maxDuration = 30;
-
 const attachmentQuery = z.object({
   messageId: z.string(),
   attachmentId: z.string(),

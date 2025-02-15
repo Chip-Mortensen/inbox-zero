@@ -9,9 +9,6 @@ import { createScopedLogger } from "@/utils/logger";
 import { isAssistantEmail } from "@/utils/assistant/is-assistant-email";
 import { GmailLabel } from "@/utils/gmail/label";
 
-export const dynamic = "force-dynamic";
-export const maxDuration = 30;
-
 const logger = createScopedLogger("api/google/messages");
 
 export type MessagesResponse = Awaited<ReturnType<typeof getMessages>>;

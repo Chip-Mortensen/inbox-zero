@@ -6,9 +6,6 @@ import { getGmailAccessToken } from "@/utils/gmail/client";
 import { uniq } from "lodash";
 import { getMessagesBatch } from "@/utils/gmail/message";
 
-export const dynamic = "force-dynamic";
-export const maxDuration = 30;
-
 const messagesBatchQuery = z.object({
   messageIds: z
     .array(z.string())

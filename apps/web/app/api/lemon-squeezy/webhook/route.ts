@@ -122,46 +122,25 @@ export const POST = withError(async (request: Request) => {
   return NextResponse.json({ ok: true });
 });
 
-export const dynamic = "force-dynamic";
-export const maxDuration = 120;
-export const runtime = "edge";
-
 // https://docs.lemonsqueezy.com/help/webhooks#signing-requests
+// https://gist.github.com/amosbastian/e403e1d8ccf4f7153f7840dd11a85a69
 async function getPayload(request: Request): Promise<Payload> {
   if (!env.LEMON_SQUEEZY_SIGNING_SECRET)
     throw new Error("No Lemon Squeezy signing secret provided.");
 
   const text = await request.text();
-  const signature = request.headers.get("x-signature");
-  if (!signature) throw new Error("No signature provided");
-
-  // Convert the signing secret to an ArrayBuffer
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(env.LEMON_SQUEEZY_SIGNING_SECRET);
-  const key = await crypto.subtle.importKey(
-    "raw",
-    keyData,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
+  const hmac = crypto.createHmac("sha256", env.LEMON_SQUEEZY_SIGNING_SECRET);
+  const digest = Buffer.from(hmac.update(text).digest("hex"), "utf8");
+  const signature = Buffer.from(
+    request.headers.get("x-signature") as string,
+    "utf8",
   );
 
-  // Sign the request body
-  const signatureData = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    encoder.encode(text),
-  );
-
-  // Convert the signature to hex
-  const signatureArray = Array.from(new Uint8Array(signatureData));
-  const computedSignature = signatureArray
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-
-  if (computedSignature !== signature) throw new Error("Invalid signature.");
+  if (!crypto.timingSafeEqual(digest, signature))
+    throw new Error("Invalid signature.");
 
   const payload: Payload = JSON.parse(text);
+
   return payload;
 }
 
