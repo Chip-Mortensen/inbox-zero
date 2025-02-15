@@ -31,7 +31,9 @@ export async function hasPostCronSecret(request: Request) {
   return headerSecret === env.CRON_SECRET;
 }
 
-export function getCronSecretHeader() {
+export function getCronSecretHeader(): Record<string, string> | undefined {
+  if (!env.CRON_SECRET) return undefined;
+
   return {
     "x-cron-secret": env.CRON_SECRET,
   };
