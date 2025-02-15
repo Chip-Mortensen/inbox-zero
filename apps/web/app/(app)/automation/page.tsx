@@ -11,7 +11,7 @@ import { RulesPrompt } from "@/app/(app)/automation/RulesPrompt";
 import { OnboardingModal } from "@/components/OnboardingModal";
 import { PermissionsCheck } from "@/app/(app)/PermissionsCheck";
 
-export const maxDuration = 300; // Applies to the actions
+export const maxDuration = 60; // Maximum allowed for Vercel hobby plan
 
 export default async function AutomationPage() {
   const session = await auth();
