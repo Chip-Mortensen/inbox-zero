@@ -90,7 +90,10 @@ function getCategorizeSendersQueueName(userId: string) {
 export async function publishToAiCategorizeSendersQueue(
   body: AiCategorizeSenders,
 ) {
-  const url = `${env.WEBHOOK_URL || env.NEXT_PUBLIC_BASE_URL}/api/user/categorize/senders/batch`;
+  const baseUrl = env.WEBHOOK_URL || env.NEXT_PUBLIC_BASE_URL;
+  const url = env.QSTASH_TOKEN
+    ? `${baseUrl}/api/user/categorize/senders/batch`
+    : `${baseUrl}/api/user/categorize/senders/batch/simple`;
 
   // Split senders into smaller chunks to process in batches
   const BATCH_SIZE = 50;
@@ -107,16 +110,32 @@ export async function publishToAiCategorizeSendersQueue(
   });
 
   // Process all chunks in parallel, each as a separate queue item
-  await Promise.all(
-    chunks.map((senderChunk) =>
-      publishToQstashQueue({
-        queueName,
-        parallelism: 3, // Allow up to 3 concurrent jobs from this queue
-        url,
-        body: { userId: body.userId, senders: senderChunk },
-      }),
-    ),
-  );
+  if (env.QSTASH_TOKEN) {
+    await Promise.all(
+      chunks.map((senderChunk) =>
+        publishToQstashQueue({
+          queueName,
+          parallelism: 3, // Allow up to 3 concurrent jobs from this queue
+          url,
+          body: { userId: body.userId, senders: senderChunk },
+        }),
+      ),
+    );
+  } else {
+    // When QStash is not configured, make direct HTTP calls
+    await Promise.all(
+      chunks.map((senderChunk) =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": env.INTERNAL_API_KEY || "",
+          },
+          body: JSON.stringify({ userId: body.userId, senders: senderChunk }),
+        }),
+      ),
+    );
+  }
 }
 
 /**
