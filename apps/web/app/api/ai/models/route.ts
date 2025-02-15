@@ -18,6 +18,10 @@ async function getOpenAiModels({ apiKey }: { apiKey: string }) {
   return models.data.filter((m) => m.id.startsWith("gpt-"));
 }
 
+// Make the route dynamic
+export const dynamic = "force-dynamic";
+export const runtime = "edge";
+
 export const GET = withError(async () => {
   const session = await auth();
   if (!session?.user.email)
