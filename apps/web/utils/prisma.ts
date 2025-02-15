@@ -6,7 +6,19 @@ declare global {
 }
 
 // biome-ignore lint/suspicious/noRedeclare: <explanation>
-const prisma = global.prisma || new PrismaClient();
+const prisma =
+  global.prisma ||
+  new PrismaClient({
+    datasources: {
+      db: {
+        // Use DIRECT_URL in production to avoid connection pooling issues
+        url:
+          process.env.NODE_ENV === "production"
+            ? process.env.DIRECT_URL
+            : process.env.DATABASE_URL,
+      },
+    },
+  });
 
 if (env.NODE_ENV === "development") global.prisma = prisma;
 
