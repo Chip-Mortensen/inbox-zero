@@ -29,13 +29,24 @@ const nextConfig = {
     },
   },
   webpack: (config, { dev, isServer }) => {
+    // Add module exclusions for server-side code
+    if (isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        // Exclude browser-specific modules from server build
+        "ai/streams": false,
+      };
+    }
+
     // Optimize production builds
     if (!dev) {
       config.optimization = {
         ...config.optimization,
         moduleIds: "deterministic",
         splitChunks: {
-          chunks: "all",
+          chunks: isServer
+            ? "all"
+            : (chunk) => !/^(polyfills|main|pages\/_app)/.test(chunk.name),
           cacheGroups: {
             tremor: {
               test: /[\\/]node_modules[\\/](@tremor)[\\/]/,
@@ -49,8 +60,10 @@ const nextConfig = {
             },
             commons: {
               test: /[\\/]node_modules[\\/]/,
-              name: "vendors",
+              name: isServer ? "commons" : "vendors",
               chunks: "all",
+              priority: -10,
+              reuseExistingChunk: true,
             },
           },
         },
