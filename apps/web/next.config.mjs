@@ -19,6 +19,8 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["@sentry/nextjs", "@sentry/node"],
     instrumentationHook: true,
+    // Add transpilePackages to ensure proper handling of client-side modules
+    transpilePackages: ["ai"],
     turbo: {
       rules: {
         "*.svg": {
@@ -35,6 +37,19 @@ const nextConfig = {
         ...config.resolve.alias,
         // Exclude browser-specific modules from server build
         "ai/streams": false,
+        "ai/react": false,
+      };
+
+      const originalEntry = config.entry;
+      config.entry = async () => {
+        const entries = await originalEntry();
+        // These packages use browser-specific globals
+        if (entries["pages/_app"]) {
+          entries["pages/_app"] = entries["pages/_app"].filter(
+            (entry) => !entry.includes("node_modules/ai/"),
+          );
+        }
+        return entries;
       };
     }
 
@@ -44,23 +59,46 @@ const nextConfig = {
         ...config.optimization,
         moduleIds: "deterministic",
         splitChunks: {
-          chunks: isServer
-            ? "all"
-            : (chunk) => !/^(polyfills|main|pages\/_app)/.test(chunk.name),
+          chunks: "all",
           cacheGroups: {
+            default: false,
+            vendors: false,
+            // Bundle commonly used packages together
+            framework: {
+              chunks: "all",
+              name: "framework",
+              test: /(?<!node_modules.*)[\\/]node_modules[\\/](react|react-dom|scheduler|next|@next|@vercel)[\\/]/,
+              priority: 40,
+              enforce: true,
+            },
+            ai: {
+              chunks: (chunk) => !isServer && chunk.name === "pages/_app",
+              test: /[\\/]node_modules[\\/](ai)[\\/]/,
+              name: "ai-lib",
+              priority: 30,
+              reuseExistingChunk: true,
+            },
             tremor: {
               test: /[\\/]node_modules[\\/](@tremor)[\\/]/,
               name: "tremor",
               chunks: "all",
+              priority: 20,
             },
             charts: {
               test: /[\\/]node_modules[\\/](chart\.js|react-chartjs-2)[\\/]/,
               name: "charts",
               chunks: "all",
+              priority: 20,
             },
             commons: {
+              name: "commons",
+              minChunks: 2,
+              priority: 10,
+            },
+            // Bundle remaining node_modules together
+            lib: {
               test: /[\\/]node_modules[\\/]/,
-              name: isServer ? "commons" : "vendors",
+              name: isServer ? "lib-server" : "lib-client",
               chunks: "all",
               priority: -10,
               reuseExistingChunk: true,
