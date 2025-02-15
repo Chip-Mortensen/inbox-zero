@@ -4,25 +4,35 @@ import { createScopedLogger } from "@/utils/logger";
 const logger = createScopedLogger("cron");
 
 export function hasCronSecret(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  const valid = authHeader === `Bearer ${env.CRON_SECRET}`;
+  const url = new URL(request.url);
+  const secret = url.searchParams.get("cron_secret");
 
-  if (!valid) logger.error("Unauthorized cron request:", { authHeader });
+  logger.info("Checking cron secret from URL params", {
+    hasSecret: !!secret,
+    matches: secret === env.CRON_SECRET,
+    urlSecret: secret,
+    envSecret: env.CRON_SECRET,
+  });
 
-  return valid;
+  return secret === env.CRON_SECRET;
 }
 
 export async function hasPostCronSecret(request: Request) {
-  // Clone the request before consuming the body
-  const clonedRequest = request.clone();
-  const body = await clonedRequest.json();
-  const valid = body.CRON_SECRET === env.CRON_SECRET;
+  const headerSecret = request.headers.get("x-cron-secret");
 
-  if (!valid) logger.error("Unauthorized cron request:", { body });
+  logger.info("Checking POST cron secret from headers", {
+    hasHeaderSecret: !!headerSecret,
+    matches: headerSecret === env.CRON_SECRET,
+    headerSecret,
+    envSecret: env.CRON_SECRET,
+    allHeaders: Object.fromEntries(request.headers.entries()),
+  });
 
-  return valid;
+  return headerSecret === env.CRON_SECRET;
 }
 
 export function getCronSecretHeader() {
-  return new Headers({ authorization: `Bearer ${env.CRON_SECRET}` });
+  return {
+    "x-cron-secret": env.CRON_SECRET,
+  };
 }

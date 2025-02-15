@@ -14,6 +14,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 async function watchAllEmails() {
+  logger.info("Starting watchAllEmails function");
+
   const premiums = await prisma.premium.findMany({
     where: {
       lemonSqueezyRenewsAt: { gt: new Date() },
@@ -41,30 +43,32 @@ async function watchAllEmails() {
     },
   });
 
+  logger.info("Found premium users", { count: premiums.length });
+
   const users = premiums
     .flatMap((premium) => premium.users.map((user) => ({ ...user, premium })))
     .sort((a, b) => {
-      // Prioritize null dates first
       if (!a.watchEmailsExpirationDate && b.watchEmailsExpirationDate)
         return -1;
       if (a.watchEmailsExpirationDate && !b.watchEmailsExpirationDate) return 1;
-
-      // If both have dates, sort by earliest date first
       if (a.watchEmailsExpirationDate && b.watchEmailsExpirationDate) {
         return (
           new Date(a.watchEmailsExpirationDate).getTime() -
           new Date(b.watchEmailsExpirationDate).getTime()
         );
       }
-
       return 0;
     });
 
-  logger.info("Watching emails for users", { count: users.length });
+  logger.info("Processing users", { totalUsers: users.length });
 
   for (const user of users) {
     try {
-      logger.info("Watching emails for user", { email: user.email });
+      logger.info("Processing user", {
+        email: user.email,
+        hasWatchExpiration: !!user.watchEmailsExpirationDate,
+        watchExpiration: user.watchEmailsExpirationDate,
+      });
 
       const userHasAiAccess = hasAiAccess(
         user.premium.aiAutomationAccess,
@@ -75,42 +79,41 @@ async function watchAllEmails() {
         user.aiApiKey,
       );
 
+      logger.info("User access status", {
+        email: user.email,
+        hasAiAccess: userHasAiAccess,
+        hasColdEmailAccess: userHasColdEmailAccess,
+      });
+
       if (!userHasAiAccess && !userHasColdEmailAccess) {
-        logger.info("User does not have access to AI or cold email", {
+        logger.info("User does not have required access", {
           email: user.email,
         });
         if (
           user.watchEmailsExpirationDate &&
           new Date(user.watchEmailsExpirationDate) < new Date()
         ) {
-          prisma.user.update({
+          logger.info("Updating expired watch date", { email: user.email });
+          await prisma.user.update({
             where: { id: user.id },
             data: { watchEmailsExpirationDate: null },
           });
         }
-
         continue;
       }
 
-      // if (
-      //   user.watchEmailsExpirationDate &&
-      //   new Date(user.watchEmailsExpirationDate) > addDays(new Date(), 2)
-      // ) {
-      //   console.log(
-      //     `User ${user.email} already has a watchEmailsExpirationDate set to: ${user.watchEmailsExpirationDate}`,
-      //   );
-      //   continue;
-      // }
-
       const account = user.accounts[0];
 
-      if (!account.access_token || !account.refresh_token) {
-        logger.info("User has no access token or refresh token", {
+      if (!account?.access_token || !account?.refresh_token) {
+        logger.warn("Missing tokens for user", {
           email: user.email,
+          hasAccessToken: !!account?.access_token,
+          hasRefreshToken: !!account?.refresh_token,
         });
         continue;
       }
 
+      logger.info("Getting Gmail client", { email: user.email });
       const gmail = await getGmailClientWithRefresh(
         {
           accessToken: account.access_token,
@@ -120,12 +123,20 @@ async function watchAllEmails() {
         account.providerAccountId,
       );
 
-      // couldn't refresh the token
-      if (!gmail) continue;
+      if (!gmail) {
+        logger.error("Failed to get Gmail client", { email: user.email });
+        continue;
+      }
 
+      logger.info("Watching emails for user", { email: user.email });
       await watchEmails(user.id, gmail);
+      logger.info("Successfully set up watch for user", { email: user.email });
     } catch (error) {
-      logger.error("Error for user", { userId: user.id, error });
+      logger.error("Error processing user", {
+        userId: user.id,
+        email: user.email,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -133,23 +144,44 @@ async function watchAllEmails() {
 }
 
 export const GET = withError(async (request: Request) => {
+  logger.info("Received GET request", {
+    url: request.url,
+    headers: Object.fromEntries(request.headers.entries()),
+  });
+
   if (!hasCronSecret(request)) {
+    logger.error("Unauthorized GET request", {
+      headers: Object.fromEntries(request.headers.entries()),
+    });
     captureException(
       new Error("Unauthorized cron request: api/google/watch/all"),
     );
     return new Response("Unauthorized", { status: 401 });
   }
 
+  logger.info("Authorized GET request, proceeding with watchAllEmails");
   return watchAllEmails();
 });
 
 export const POST = withError(async (request: Request) => {
-  if (!(await hasPostCronSecret(request))) {
+  logger.info("Received POST request", {
+    url: request.url,
+    headers: Object.fromEntries(request.headers.entries()),
+  });
+
+  const hasSecret = await hasPostCronSecret(request);
+  logger.info("POST request authorization check", { hasSecret });
+
+  if (!hasSecret) {
+    logger.error("Unauthorized POST request", {
+      headers: Object.fromEntries(request.headers.entries()),
+    });
     captureException(
       new Error("Unauthorized cron request: api/google/watch/all"),
     );
     return new Response("Unauthorized", { status: 401 });
   }
 
+  logger.info("Authorized POST request, proceeding with watchAllEmails");
   return watchAllEmails();
 });
