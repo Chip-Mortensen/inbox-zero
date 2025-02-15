@@ -64,24 +64,33 @@ export const getGmailClientWithRefresh = async (
     hasRefreshToken: !!session.refreshToken,
     hasExpiryDate: !!session.expiryDate,
     expiryDate: session.expiryDate
-      ? new Date(session.expiryDate).toISOString()
+      ? new Date(session.expiryDate * 1000).toISOString()
       : null,
+    providerAccountId,
   });
 
   const auth = getClient(session);
   const g = gmail({ version: "v1", auth });
 
-  if (session.expiryDate && session.expiryDate > Date.now()) {
+  if (session.expiryDate && session.expiryDate > Date.now() / 1000) {
     logger.info("Token still valid, using existing token", {
-      expiresIn: Math.round((session.expiryDate - Date.now()) / 1000 / 60),
+      expiresIn: Math.round((session.expiryDate - Date.now() / 1000) / 60),
       minutes: true,
+      providerAccountId,
     });
     return g;
   }
 
   // may throw `invalid_grant` error
   try {
-    logger.info("Attempting to refresh access token");
+    logger.info("Attempting to refresh access token", {
+      providerAccountId,
+      tokenLength: session.refreshToken.length,
+      expiryDate: session.expiryDate
+        ? new Date(session.expiryDate * 1000).toISOString()
+        : null,
+    });
+
     const tokens = await auth.refreshAccessToken();
     const newAccessToken = tokens.credentials.access_token;
 
@@ -91,6 +100,7 @@ export const getGmailClientWithRefresh = async (
       newExpiryDate: tokens.credentials.expiry_date
         ? new Date(tokens.credentials.expiry_date).toISOString()
         : null,
+      providerAccountId,
     });
 
     if (newAccessToken !== session.accessToken) {
@@ -111,10 +121,15 @@ export const getGmailClientWithRefresh = async (
     return g;
   } catch (error) {
     if (error instanceof Error && error.message.includes("invalid_grant")) {
-      logger.error("Error refreshing Gmail access token", {
+      logger.error("Error refreshing Gmail access token: invalid_grant", {
         error,
         errorMessage: error.message,
         errorStack: error.stack,
+        providerAccountId,
+        tokenLength: session.refreshToken.length,
+        expiryDate: session.expiryDate
+          ? new Date(session.expiryDate * 1000).toISOString()
+          : null,
       });
       return undefined;
     }
@@ -123,6 +138,11 @@ export const getGmailClientWithRefresh = async (
       error,
       errorMessage: error instanceof Error ? error.message : String(error),
       errorStack: error instanceof Error ? error.stack : undefined,
+      providerAccountId,
+      tokenLength: session.refreshToken.length,
+      expiryDate: session.expiryDate
+        ? new Date(session.expiryDate * 1000).toISOString()
+        : null,
     });
 
     throw error;
