@@ -1,17 +1,28 @@
 import type { ResolvingMetadata } from "next";
-import { sanityFetch } from "@/sanity/lib/fetch";
-import { postPathsQuery, postQuery } from "@/sanity/lib/queries";
-import { client } from "@/sanity/lib/client";
-import imageUrlBuilder from "@sanity/image-url";
-import { Post } from "@/app/blog/post/[slug]/Post";
-import type { Post as PostType } from "@/app/blog/types";
-import { captureException } from "@/utils/error";
+import { notFound } from "next/navigation";
+
+const posts = [
+  {
+    slug: "how-my-open-source-saas-hit-first-on-product-hunt",
+    title: "How Inbox Zero hit #1 on Product Hunt",
+    description: "Two weeks ago I launched Inbox Zero on Product Hunt...",
+    date: "2024-01-22",
+  },
+  {
+    slug: "why-build-an-open-source-saas",
+    title: "Why Build An Open Source SaaS",
+    description: "Open source SaaS products are blowing up...",
+    date: "2024-01-25",
+  },
+  // Add other posts here...
+];
 
 export const revalidate = 60;
 
 export async function generateStaticParams() {
-  const posts = await client.fetch(postPathsQuery);
-  return posts;
+  return posts.map((post) => ({
+    slug: post.slug,
+  }));
 }
 
 type Props = {
@@ -22,48 +33,33 @@ export async function generateMetadata(
   { params }: Props,
   parent: ResolvingMetadata,
 ) {
-  const post = await sanityFetch<PostType | undefined>({
-    query: postQuery,
-    params,
-  });
+  const post = posts.find((p) => p.slug === params.slug);
 
-  if (!post) {
-    captureException(new Error(`Post not found. Slug: ${params.slug}`), {
-      extra: {
-        params,
-        query: postQuery,
-      },
-    });
-    return {};
-  }
+  if (!post) return {};
 
   const previousImages = (await parent).openGraph?.images || [];
 
-  const builder = imageUrlBuilder(client);
-  const imageUrl = post.mainImage
-    ? builder
-        .image(post.mainImage)
-        .auto("format")
-        .fit("max")
-        .width(1200)
-        .height(630)
-        .url()
-    : undefined;
-
   return {
     title: post.title,
-    description: post.description ?? "",
+    description: post.description,
     alternates: { canonical: `/blog/post/${params.slug}` },
     openGraph: {
-      images: imageUrl ? [imageUrl, ...previousImages] : previousImages,
+      images: previousImages,
     },
   };
 }
 
-// Multiple versions of this page will be statically generated
-// using the `params` returned by `generateStaticParams`
 export default async function Page({ params }: Props) {
-  const post = await sanityFetch<PostType>({ query: postQuery, params });
+  const post = posts.find((p) => p.slug === params.slug);
 
-  return <Post post={post} />;
+  if (!post) notFound();
+
+  return (
+    <div className="prose mx-auto max-w-4xl p-6">
+      <h1>{post.title}</h1>
+      <p className="text-gray-600">{post.date}</p>
+      <p>{post.description}</p>
+      <p>Full content coming soon...</p>
+    </div>
+  );
 }
