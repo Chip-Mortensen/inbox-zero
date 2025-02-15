@@ -46,6 +46,8 @@
         "USE_BACKUP_MODEL",
         "WHITELIST_FROM",
         "API_KEY_SALT",
+        "TURBO_TEAM",
+        "TURBO_REMOTE_ONLY",
 
         "NEXT_PUBLIC_LEMON_STORE_ID",
 
@@ -96,7 +98,10 @@
         "NEXT_PUBLIC_AXIOM_TOKEN",
         "NEXT_PUBLIC_BEDROCK_SONNET_MODEL",
         "NEXT_PUBLIC_BEDROCK_ANTHROPIC_BACKUP_MODEL",
-        "NEXT_PUBLIC_OLLAMA_MODEL"
+        "NEXT_PUBLIC_OLLAMA_MODEL",
+        "NEXT_PUBLIC_SANITY_PROJECT_ID",
+        "NEXT_PUBLIC_SANITY_DATASET",
+        "NEXT_PUBLIC_SANITY_API_VERSION"
       ],
       "outputs": [".next/**", "!.next/cache/**"]
     },

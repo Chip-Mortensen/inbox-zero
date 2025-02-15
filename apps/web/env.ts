@@ -117,6 +117,9 @@ export const env = createEnv({
       .string()
       .default("us.anthropic.claude-3-5-haiku-20241022-v1:0"),
     NEXT_PUBLIC_OLLAMA_MODEL: z.string().optional(),
+    NEXT_PUBLIC_SANITY_PROJECT_ID: z.string().optional(),
+    NEXT_PUBLIC_SANITY_DATASET: z.string().default("production"),
+    NEXT_PUBLIC_SANITY_API_VERSION: z.string().default("2024-09-03"),
   },
   // For Next.js >= 13.4.4, you only need to destructure client variables:
   experimental__runtimeEnv: {
