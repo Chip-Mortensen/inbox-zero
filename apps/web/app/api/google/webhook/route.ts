@@ -5,6 +5,7 @@ import { processHistoryForUser } from "@/app/api/google/webhook/process-history"
 import { logger } from "@/app/api/google/webhook/logger";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
+export const runtime = "edge";
 
 // Google PubSub calls this endpoint each time a user recieves an email. We subscribe for updates via `api/google/watch`
 export const POST = withError(async (request: Request) => {
@@ -40,7 +41,7 @@ function decodeHistoryId(body: any) {
   // data is base64url-encoded JSON
   const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
   const decodedData: { emailAddress: string; historyId: number | string } =
-    JSON.parse(Buffer.from(base64, "base64").toString());
+    JSON.parse(atob(base64));
 
   // seem to get this in different formats? so unifying as number
   const historyId =
