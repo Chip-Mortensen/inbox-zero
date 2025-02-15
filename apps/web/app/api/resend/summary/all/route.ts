@@ -16,7 +16,7 @@ import { publishToQstashQueue } from "@/utils/upstash";
 const logger = createScopedLogger("cron/resend/summary/all");
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 async function sendSummaryAllUpdate() {
   logger.info("Sending summary all update");

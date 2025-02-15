@@ -11,7 +11,7 @@ import { createScopedLogger } from "@/utils/logger";
 const logger = createScopedLogger("api/google/watch/all");
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 async function watchAllEmails() {
   const premiums = await prisma.premium.findMany({

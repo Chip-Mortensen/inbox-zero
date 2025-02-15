@@ -28,7 +28,7 @@ import { CategorizeSendersProgress } from "@/app/(app)/smart-categories/Categori
 import { getCategorizationProgress } from "@/utils/redis/categorization-progress";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 export default async function CategoriesPage() {
   const session = await auth();

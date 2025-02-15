@@ -7,7 +7,7 @@ import { OnboardingFinish } from "@/app/(app)/onboarding/OnboardingFinish";
 import { PermissionsCheck } from "@/app/(app)/PermissionsCheck";
 import { LoadStats } from "@/providers/StatLoaderProvider";
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 export default function OnboardingPage({
   searchParams,

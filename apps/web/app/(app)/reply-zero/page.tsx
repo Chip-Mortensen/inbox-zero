@@ -11,7 +11,7 @@ import { TimeRangeFilter } from "./TimeRangeFilter";
 import type { TimeRange } from "./date-filter";
 import { isAnalyzingReplyTracker } from "@/utils/redis/reply-tracker-analyzing";
 
-export const maxDuration = 600;
+export const maxDuration = 60;
 
 export default async function ReplyTrackerPage({
   searchParams,

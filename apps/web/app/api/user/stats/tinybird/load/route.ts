@@ -5,7 +5,7 @@ import { getGmailAccessToken, getGmailClient } from "@/utils/gmail/client";
 import { loadTinybirdEmails } from "@/app/api/user/stats/tinybird/load/load-emails";
 import { loadTinybirdEmailsBody } from "@/app/api/user/stats/tinybird/load/validation";
 
-export const maxDuration = 90;
+export const maxDuration = 60;
 
 export type LoadTinybirdEmailsResponse = Awaited<
   ReturnType<typeof loadTinybirdEmails>
