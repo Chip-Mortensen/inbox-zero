@@ -22,14 +22,27 @@ const authPrisma = new PrismaClient({
   },
 });
 
-// Test the auth client connection
-authPrisma
-  .$connect()
-  .then(() => {
+// Warm up the auth client connection with retries
+async function connectWithRetry(
+  client: PrismaClient,
+  retries = 3,
+): Promise<void> {
+  try {
+    await client.$connect();
     logger.info("Successfully connected auth client to database");
-  })
-  .catch((error) => {
-    logger.error("Failed to connect auth client to database", { error });
+  } catch (error) {
+    if (retries > 0) {
+      logger.warn(
+        `Failed to connect auth client, retrying... (${retries} attempts left)`,
+        { error },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return connectWithRetry(client, retries - 1);
+    }
+    logger.error(
+      "Failed to connect auth client to database after all retries",
+      { error },
+    );
     if (error instanceof Error) {
       logger.error("Auth client error details:", {
         message: error.message,
@@ -37,7 +50,11 @@ authPrisma
         name: error.name,
       });
     }
-  });
+    throw error;
+  }
+}
+
+void connectWithRetry(authPrisma);
 
 export const SCOPES = [
   "https://www.googleapis.com/auth/userinfo.profile",
