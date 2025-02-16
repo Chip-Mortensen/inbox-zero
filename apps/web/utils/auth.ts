@@ -5,12 +5,39 @@ import type { JWT } from "@auth/core/jwt";
 import GoogleProvider from "next-auth/providers/google";
 import { createContact as createLoopsContact } from "@inboxzero/loops";
 import { createContact as createResendContact } from "@inboxzero/resend";
-import prisma from "@/utils/prisma";
+import { PrismaClient } from "@prisma/client";
 import { env } from "@/env";
 import { captureException } from "@/utils/error";
 import { createScopedLogger } from "@/utils/logger";
 
 const logger = createScopedLogger("auth");
+
+// Create a separate Prisma client for auth
+const authPrisma = new PrismaClient({
+  log: ["error", "warn"],
+  datasources: {
+    db: {
+      url: env.DIRECT_URL,
+    },
+  },
+});
+
+// Test the auth client connection
+authPrisma
+  .$connect()
+  .then(() => {
+    logger.info("Successfully connected auth client to database");
+  })
+  .catch((error) => {
+    logger.error("Failed to connect auth client to database", { error });
+    if (error instanceof Error) {
+      logger.error("Auth client error details:", {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
+    }
+  });
 
 export const SCOPES = [
   "https://www.googleapis.com/auth/userinfo.profile",
@@ -22,6 +49,9 @@ export const SCOPES = [
     ? ["https://www.googleapis.com/auth/contacts"]
     : []),
 ];
+
+// Create a custom adapter that uses our auth Prisma client
+const customPrismaAdapter = PrismaAdapter(authPrisma);
 
 export const getAuthOptions: (options?: {
   consent: boolean;
@@ -45,7 +75,7 @@ export const getAuthOptions: (options?: {
       },
     }),
   ],
-  adapter: PrismaAdapter(prisma),
+  adapter: customPrismaAdapter,
   session: { strategy: "jwt" },
   // based on: https://authjs.dev/guides/basics/refresh-token-rotation
   // and: https://github.com/nextauthjs/next-auth-refresh-token-example/blob/main/pages/api/auth/%5B...nextauth%5D.js
@@ -73,7 +103,7 @@ export const getAuthOptions: (options?: {
           );
           token.refresh_token = account.refresh_token;
         } else {
-          const dbAccount = await prisma.account.findUnique({
+          const dbAccount = await authPrisma.account.findUnique({
             where: {
               provider_providerAccountId: {
                 providerAccountId: account.providerAccountId,
@@ -195,7 +225,7 @@ export const authOptions = getAuthOptions();
  * returns the old token and an error property
  */
 const refreshAccessToken = async (token: JWT): Promise<JWT> => {
-  const account = await prisma.account.findFirst({
+  const account = await authPrisma.account.findFirst({
     where: { userId: token.sub as string, provider: "google" },
     select: {
       userId: true,
@@ -306,7 +336,7 @@ export async function saveRefreshToken(
     return;
   }
 
-  return await prisma.account.update({
+  return await authPrisma.account.update({
     data: {
       access_token: tokens.access_token,
       expires_at: tokens.expires_at,
@@ -323,7 +353,7 @@ export async function saveRefreshToken(
 
 async function handlePendingPremiumInvite(user: { email: string }) {
   // Check for pending invite
-  const premium = await prisma.premium.findFirst({
+  const premium = await authPrisma.premium.findFirst({
     where: { pendingInvites: { has: user.email } },
     select: {
       id: true,
@@ -335,7 +365,7 @@ async function handlePendingPremiumInvite(user: { email: string }) {
 
   if (premium?.lemonSqueezySubscriptionItemId) {
     // Add user to premium and remove from pending invites
-    await prisma.premium.update({
+    await authPrisma.premium.update({
       where: { id: premium.id },
       data: {
         users: { connect: { email: user.email } },

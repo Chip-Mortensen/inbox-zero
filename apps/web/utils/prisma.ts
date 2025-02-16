@@ -1,14 +1,39 @@
 import { env } from "@/env";
 import { Prisma, PrismaClient } from "@prisma/client";
+import { createScopedLogger } from "@/utils/logger";
+
+const logger = createScopedLogger("prisma");
 
 declare global {
   var prisma: PrismaClient | undefined;
 }
 
 // biome-ignore lint/suspicious/noRedeclare: <explanation>
-const prisma = global.prisma || new PrismaClient();
+const prisma =
+  global.prisma ||
+  new PrismaClient({
+    log: ["error", "warn"],
+    datasources: {
+      db: {
+        url: env.DIRECT_URL,
+      },
+    },
+  });
 
-if (env.NODE_ENV === "development") global.prisma = prisma;
+if (process.env.NODE_ENV === "development") {
+  global.prisma = prisma;
+  logger.info("Set global prisma client in development");
+}
+
+// Test the connection
+prisma
+  .$connect()
+  .then(() => {
+    logger.info("Successfully connected to database");
+  })
+  .catch((error) => {
+    logger.error("Failed to connect to database", { error });
+  });
 
 export default prisma;
 

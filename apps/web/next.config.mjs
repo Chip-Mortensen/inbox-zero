@@ -16,6 +16,10 @@ const withMDX = nextMdx();
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  env: {
+    DATABASE_URL: process.env.DATABASE_URL,
+    DIRECT_URL: process.env.DIRECT_URL,
+  },
   experimental: {
     serverComponentsExternalPackages: ["@sentry/nextjs", "@sentry/node"],
     instrumentationHook: true,
