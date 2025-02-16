@@ -17,7 +17,7 @@ const authPrisma = new PrismaClient({
   log: ["error", "warn"],
   datasources: {
     db: {
-      url: env.DATABASE_URL,
+      url: env.DIRECT_URL,
     },
   },
 });
