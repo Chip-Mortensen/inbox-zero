@@ -17,12 +17,8 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
   env: {
-    DATABASE_URL:
-      process.env.DATABASE_URL +
-      "&connection_limit=1&pool_timeout=0&idle_timeout=0",
-    DIRECT_URL:
-      process.env.DIRECT_URL +
-      "&connection_limit=1&pool_timeout=0&idle_timeout=0",
+    DATABASE_URL: process.env.DATABASE_URL,
+    DIRECT_URL: process.env.DIRECT_URL,
   },
   experimental: {
     serverComponentsExternalPackages: ["@sentry/nextjs", "@sentry/node"],

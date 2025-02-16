@@ -15,9 +15,7 @@ const prisma =
     log: ["error", "warn"],
     datasources: {
       db: {
-        url:
-          env.DATABASE_URL +
-          "&connection_limit=1&pool_timeout=0&idle_timeout=0",
+        url: env.DATABASE_URL,
       },
     },
   });

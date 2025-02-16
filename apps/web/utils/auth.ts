@@ -17,7 +17,7 @@ const authPrisma = new PrismaClient({
   log: ["error", "warn"],
   datasources: {
     db: {
-      url: env.DIRECT_URL + "&connection_limit=1&pool_timeout=0&idle_timeout=0",
+      url: env.DIRECT_URL,
     },
   },
 });
