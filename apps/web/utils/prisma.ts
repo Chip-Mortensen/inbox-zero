@@ -29,6 +29,32 @@ prisma.$on("error" as never, (e) => {
   logger.error("Prisma error", { error: e });
 });
 
+async function connectWithRetry(
+  client: PrismaClient,
+  retries = 3,
+): Promise<void> {
+  try {
+    await client.$connect();
+    logger.info("Successfully connected Prisma client to database");
+  } catch (error) {
+    if (retries > 0) {
+      logger.warn(
+        `Failed to connect Prisma client, retrying... (${retries} attempts left)`,
+        { error },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return connectWithRetry(client, retries - 1);
+    }
+    logger.error(
+      "Failed to connect Prisma client to database after all retries",
+      { error },
+    );
+    throw error;
+  }
+}
+
+void connectWithRetry(prisma);
+
 export default prisma;
 
 export function isDuplicateError(error: unknown, key?: string) {

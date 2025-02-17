@@ -34,6 +34,11 @@ if (process.env.NODE_ENV !== "production") {
   globalThis.authPrisma = authPrisma;
 }
 
+// Add connection error handler
+authPrisma.$on("error" as never, (e) => {
+  logger.error("Auth Prisma error", { error: e });
+});
+
 // Warm up the auth client connection with retries
 async function connectWithRetry(
   client: PrismaClient,
@@ -66,6 +71,7 @@ async function connectWithRetry(
   }
 }
 
+// Initialize connection with retries
 void connectWithRetry(authPrisma);
 
 export const SCOPES = [
