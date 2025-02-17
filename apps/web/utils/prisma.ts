@@ -8,35 +8,12 @@ declare global {
   var prisma: PrismaClient | undefined;
 }
 
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 50;
-
-async function connectWithRetry(
-  client: PrismaClient,
-  retries = MAX_RETRIES,
-): Promise<void> {
-  try {
-    await client.$connect();
-    logger.info("Successfully connected to database");
-  } catch (error) {
-    if (retries > 0) {
-      logger.warn(`Failed to connect, retrying... (${retries} attempts left)`, {
-        error,
-      });
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-      return connectWithRetry(client, retries - 1);
-    }
-    logger.error("Failed to connect to database after all retries", { error });
-    throw error;
-  }
-}
-
 const prismaClientSingleton = () => {
   return new PrismaClient({
     log: ["error", "warn"],
     datasources: {
       db: {
-        url: env.DIRECT_URL,
+        url: env.DATABASE_URL,
       },
     },
   });
@@ -48,8 +25,9 @@ if (process.env.NODE_ENV !== "production") {
   globalThis.prisma = prisma;
 }
 
-// Warm up the connection with retries
-void connectWithRetry(prisma);
+prisma.$on("error", (e) => {
+  logger.error("Prisma error", { error: e });
+});
 
 export default prisma;
 
@@ -69,26 +47,4 @@ export function isNotFoundError(error: unknown) {
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === "P2025"
   );
-}
-
-// Helper to retry database operations
-export async function withRetry<T>(
-  operation: () => Promise<T>,
-  retries = MAX_RETRIES,
-): Promise<T> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientInitializationError &&
-      retries > 0
-    ) {
-      logger.warn(`Operation failed, retrying... (${retries} attempts left)`, {
-        error,
-      });
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-      return withRetry(operation, retries - 1);
-    }
-    throw error;
-  }
 }

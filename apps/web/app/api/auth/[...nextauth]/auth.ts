@@ -1,5 +1,5 @@
 import NextAuth from "next-auth";
-import { getAuthOptions, authOptions } from "@/utils/auth";
+import { getAuthOptions } from "@/utils/auth";
 import { createScopedLogger } from "@/utils/logger";
 
 const logger = createScopedLogger("Auth API");
@@ -19,7 +19,7 @@ export const {
       }
     }
 
-    return authOptions;
+    return getAuthOptions();
   } catch (error) {
     logger.error("Auth configuration error", { error });
     throw error;
