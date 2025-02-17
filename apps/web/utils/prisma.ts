@@ -38,7 +38,10 @@ const prisma =
     log: ["error", "warn"],
     datasources: {
       db: {
-        url: env.DIRECT_URL,
+        url:
+          process.env.NODE_ENV === "production"
+            ? env.DATABASE_URL // Use connection pooling in production
+            : env.DIRECT_URL, // Use direct connection in development
       },
     },
   });
