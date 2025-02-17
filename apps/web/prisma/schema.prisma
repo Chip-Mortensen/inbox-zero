@@ -1,12 +1,16 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DIRECT_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+
+  // Explicitly tell Prisma to use direct connections for migrations
+  // but pooled connections for queries
   relationMode = "prisma"
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 // Account, User, Session, and VerificationToken based on: https://authjs.dev/reference/adapter/prisma

@@ -4,13 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "NODE_OPTIONS=--max_old_space_size=8192 prisma migrate deploy && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "test": "cross-env RUN_AI_TESTS=false vitest",
     "test-ai": "cross-env RUN_AI_TESTS=true vitest",
     "preinstall": "npx only-allow pnpm",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "vercel-build": "prisma generate && next build"
   },
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "1.1.6",
