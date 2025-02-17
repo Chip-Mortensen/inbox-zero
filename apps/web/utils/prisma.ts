@@ -31,24 +31,21 @@ async function connectWithRetry(
   }
 }
 
-// biome-ignore lint/suspicious/noRedeclare: <explanation>
-const prisma =
-  global.prisma ||
-  new PrismaClient({
+const prismaClientSingleton = () => {
+  return new PrismaClient({
     log: ["error", "warn"],
     datasources: {
       db: {
-        url:
-          process.env.NODE_ENV === "production"
-            ? env.DATABASE_URL // Use connection pooling in production
-            : env.DIRECT_URL, // Use direct connection in development
+        url: env.DIRECT_URL,
       },
     },
   });
+};
 
-if (process.env.NODE_ENV === "development") {
-  global.prisma = prisma;
-  logger.info("Set global prisma client in development");
+const prisma = globalThis.prisma ?? prismaClientSingleton();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.prisma = prisma;
 }
 
 // Warm up the connection with retries

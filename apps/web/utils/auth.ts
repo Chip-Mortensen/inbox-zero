@@ -12,15 +12,27 @@ import { createScopedLogger } from "@/utils/logger";
 
 const logger = createScopedLogger("auth");
 
+declare global {
+  var authPrisma: PrismaClient | undefined;
+}
+
 // Create a separate Prisma client for auth
-const authPrisma = new PrismaClient({
-  log: ["error", "warn"],
-  datasources: {
-    db: {
-      url: env.DIRECT_URL, // Always use direct connection for auth
+const authPrismaClientSingleton = () => {
+  return new PrismaClient({
+    log: ["error", "warn"],
+    datasources: {
+      db: {
+        url: env.DIRECT_URL,
+      },
     },
-  },
-});
+  });
+};
+
+const authPrisma = globalThis.authPrisma ?? authPrismaClientSingleton();
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.authPrisma = authPrisma;
+}
 
 // Warm up the auth client connection with retries
 async function connectWithRetry(
@@ -387,7 +399,7 @@ async function handlePendingPremiumInvite(user: { email: string }) {
       data: {
         users: { connect: { email: user.email } },
         pendingInvites: {
-          set: premium.pendingInvites.filter((email) => email !== user.email),
+          set: premium.pendingInvites.filter((e: string) => e !== user.email),
         },
       },
     });
