@@ -25,6 +25,7 @@ import { EmailAttachments } from "@/components/email-list/EmailAttachments";
 import { isActionError } from "@/utils/error";
 import { Loading } from "@/components/Loading";
 import { MessageText } from "@/components/Typography";
+import { CalendarEventButton } from "./CalendarEventButton";
 
 export function EmailMessage({
   message,
@@ -107,6 +108,11 @@ export function EmailMessage({
           )}
 
           {message.attachments && <EmailAttachments message={message} />}
+
+          <CalendarEventButton
+            subject={message.headers.subject}
+            content={message.textPlain || message.textHtml || ""}
+          />
 
           {(showReply || showForward) && (
             <ReplyPanel

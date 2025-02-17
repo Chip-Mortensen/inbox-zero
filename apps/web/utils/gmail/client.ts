@@ -12,19 +12,9 @@ type ClientOptions = {
 };
 
 const getClient = (session: ClientOptions) => {
-  logger.info("Initializing Google OAuth client", {
-    hasAccessToken: !!session.accessToken,
-    hasRefreshToken: !!session.refreshToken,
-  });
-
   const googleAuth = new auth.OAuth2({
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,
-  });
-
-  logger.info("Setting OAuth credentials", {
-    clientIdLength: env.GOOGLE_CLIENT_ID.length,
-    clientSecretLength: env.GOOGLE_CLIENT_SECRET.length,
   });
 
   // not passing refresh_token when next-auth handles it
