@@ -76,15 +76,13 @@ async function sendEmail({ email, force }: { email: string; force?: boolean }) {
   // Get counts and recent threads for each type
   const [counts, needsReply, awaitingReply, needsAction] = await Promise.all([
     // NOTE: should really be distinct by threadId. this will cause a mismatch in some cases
-    prisma.threadTracker.groupBy({
-      by: ["type"],
-      where: {
-        userId: user.id,
-        resolved: false,
-        sentAt: { gt: cutOffDate },
-      },
-      _count: true,
-    }),
+    prisma.$queryRaw`
+      SELECT type, COUNT(*) as _count
+      FROM "ThreadTracker"
+      WHERE "userId" = ${user.id}
+        AND resolved = false
+      GROUP BY type
+    ` as Promise<Array<{ type: ThreadTrackerType; _count: number }>>,
     prisma.threadTracker.findMany({
       where: {
         userId: user.id,
