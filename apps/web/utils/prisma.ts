@@ -25,13 +25,19 @@ if (process.env.NODE_ENV !== "production") {
   globalThis.prisma = prisma;
 }
 
-prisma.$on("error" as never, (e) => {
+prisma.$on("error" as never, async (e) => {
   logger.error("Prisma error", { error: e });
+  try {
+    await connectWithRetry(prisma);
+  } catch (error) {
+    logger.error("Failed to reconnect prisma client", { error });
+  }
 });
 
 async function connectWithRetry(
   client: PrismaClient,
-  retries = 3,
+  retries = 5,
+  backoffMs = 1000,
 ): Promise<void> {
   try {
     await client.$connect();
@@ -42,8 +48,12 @@ async function connectWithRetry(
         `Failed to connect Prisma client, retrying... (${retries} attempts left)`,
         { error },
       );
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      return connectWithRetry(client, retries - 1);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      return connectWithRetry(
+        client,
+        retries - 1,
+        Math.min(backoffMs * 2, 10000),
+      );
     }
     logger.error(
       "Failed to connect Prisma client to database after all retries",

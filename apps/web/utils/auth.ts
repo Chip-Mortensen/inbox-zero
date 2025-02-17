@@ -34,15 +34,21 @@ if (process.env.NODE_ENV !== "production") {
   globalThis.authPrisma = authPrisma;
 }
 
-// Add connection error handler
-authPrisma.$on("error" as never, (e) => {
+// Add connection error handler with reconnection logic
+authPrisma.$on("error" as never, async (e) => {
   logger.error("Auth Prisma error", { error: e });
+  try {
+    await connectWithRetry(authPrisma);
+  } catch (error) {
+    logger.error("Failed to reconnect auth client", { error });
+  }
 });
 
 // Warm up the auth client connection with retries
 async function connectWithRetry(
   client: PrismaClient,
-  retries = 3,
+  retries = 5,
+  backoff = 1000,
 ): Promise<void> {
   try {
     await client.$connect();
@@ -50,11 +56,15 @@ async function connectWithRetry(
   } catch (error) {
     if (retries > 0) {
       logger.warn(
-        `Failed to connect auth client, retrying... (${retries} attempts left)`,
+        `Failed to connect auth client, retrying in ${backoff}ms... (${retries} attempts left)`,
         { error },
       );
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      return connectWithRetry(client, retries - 1);
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+      return connectWithRetry(
+        client,
+        retries - 1,
+        Math.min(backoff * 2, 10000),
+      );
     }
     logger.error(
       "Failed to connect auth client to database after all retries",
