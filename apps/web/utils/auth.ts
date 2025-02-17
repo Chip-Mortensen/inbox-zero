@@ -36,11 +36,27 @@ if (process.env.NODE_ENV !== "production") {
 
 // Add connection error handler with reconnection logic
 authPrisma.$on("error" as never, async (e) => {
-  logger.error("Auth Prisma error", { error: e });
-  try {
-    await connectWithRetry(authPrisma);
-  } catch (error) {
-    logger.error("Failed to reconnect auth client", { error });
+  const error = e as Error;
+  const isSSLError =
+    error.message?.includes("SSL") || error.message?.includes("exchange_error");
+  logger.error("Auth Prisma error", { error: e, isSSLError });
+
+  if (isSSLError) {
+    logger.warn("SSL/Exchange error detected, attempting immediate reconnect");
+    try {
+      await authPrisma.$disconnect();
+      await connectWithRetry(authPrisma, 3, 100); // Faster retries for SSL errors
+    } catch (reconnectError) {
+      logger.error("Failed to reconnect after SSL error", {
+        error: reconnectError,
+      });
+    }
+  } else {
+    try {
+      await connectWithRetry(authPrisma);
+    } catch (error) {
+      logger.error("Failed to reconnect auth client", { error });
+    }
   }
 });
 
