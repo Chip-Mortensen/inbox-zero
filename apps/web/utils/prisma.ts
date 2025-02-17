@@ -9,34 +9,65 @@ declare global {
 }
 
 const prismaClientSingleton = () => {
-  return new PrismaClient({
+  const client = new PrismaClient({
     log: ["error", "warn"],
     datasources: {
       db: {
         url: env.DATABASE_URL,
       },
     },
-  }).$extends({
-    query: {
-      async $allOperations({ operation, model, args, query }) {
-        try {
-          const result = await query(args);
-          return result;
-        } catch (error) {
-          const e = error as Error;
-          if (e.message?.includes("Max client connections reached")) {
-            logger.warn(
-              "Max connections reached, forcing disconnect and retry",
-            );
-            await prisma.$disconnect();
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            return query(args);
-          }
-          throw error;
-        }
-      },
-    },
   });
+
+  // Add middleware for error handling
+  client.$use(async (params, next) => {
+    try {
+      return await next(params);
+    } catch (error) {
+      const e = error as Error;
+      const isSSLError =
+        e.message?.includes("SSL") || e.message?.includes("exchange_error");
+      const isMaxConns = e.message?.includes("Max client connections reached");
+
+      logger.error("Prisma error", { error: e, isSSLError, isMaxConns });
+
+      if (isMaxConns) {
+        logger.warn("Max connections reached, forcing disconnect");
+        try {
+          await client.$disconnect();
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          await connectWithRetry(client, 3, 50);
+          return next(params);
+        } catch (reconnectError) {
+          logger.error("Failed to reconnect after max connections error", {
+            error: reconnectError,
+          });
+        }
+      } else if (isSSLError) {
+        logger.warn(
+          "SSL/Exchange error detected, attempting immediate reconnect",
+        );
+        try {
+          await client.$disconnect();
+          await connectWithRetry(client, 3, 100);
+          return next(params);
+        } catch (reconnectError) {
+          logger.error("Failed to reconnect after SSL error", {
+            error: reconnectError,
+          });
+        }
+      } else {
+        try {
+          await connectWithRetry(client);
+          return next(params);
+        } catch (error) {
+          logger.error("Failed to reconnect prisma client", { error });
+        }
+      }
+      throw error;
+    }
+  });
+
+  return client;
 };
 
 const prisma = globalThis.prisma ?? prismaClientSingleton();
@@ -44,44 +75,6 @@ const prisma = globalThis.prisma ?? prismaClientSingleton();
 if (process.env.NODE_ENV !== "production") {
   globalThis.prisma = prisma;
 }
-
-// Handle connection errors and SSL exchange failures
-prisma.$on("error" as never, async (e) => {
-  const error = e as Error;
-  const isSSLError =
-    error.message?.includes("SSL") || error.message?.includes("exchange_error");
-  const isMaxConns = error.message?.includes("Max client connections reached");
-  logger.error("Prisma error", { error: e, isSSLError, isMaxConns });
-
-  if (isMaxConns) {
-    logger.warn("Max connections reached, forcing disconnect");
-    try {
-      await prisma.$disconnect();
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      await connectWithRetry(prisma, 3, 50);
-    } catch (reconnectError) {
-      logger.error("Failed to reconnect after max connections error", {
-        error: reconnectError,
-      });
-    }
-  } else if (isSSLError) {
-    logger.warn("SSL/Exchange error detected, attempting immediate reconnect");
-    try {
-      await prisma.$disconnect();
-      await connectWithRetry(prisma, 3, 100);
-    } catch (reconnectError) {
-      logger.error("Failed to reconnect after SSL error", {
-        error: reconnectError,
-      });
-    }
-  } else {
-    try {
-      await connectWithRetry(prisma);
-    } catch (error) {
-      logger.error("Failed to reconnect prisma client", { error });
-    }
-  }
-});
 
 async function connectWithRetry(
   client: PrismaClient,
@@ -112,6 +105,7 @@ async function connectWithRetry(
   }
 }
 
+// Initialize connection
 void connectWithRetry(prisma);
 
 export default prisma;

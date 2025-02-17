@@ -8,11 +8,14 @@ export type NewsletterSummaryResponse = Awaited<
 >;
 
 async function getNewsletterSummary({ userId }: { userId: string }) {
-  const result = await prisma.newsletter.groupBy({
-    where: { userId },
-    by: ["status"],
-    _count: true,
-  });
+  const result = await prisma.$queryRaw<
+    Array<{ status: string; _count: number }>
+  >`
+    SELECT status, COUNT(*) as _count
+    FROM "Newsletter"
+    WHERE "userId" = ${userId}
+    GROUP BY status
+  `;
 
   const resultObject = Object.fromEntries(
     result.map((item) => [item.status, item._count]),
