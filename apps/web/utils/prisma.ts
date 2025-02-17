@@ -38,7 +38,7 @@ const prisma =
     log: ["error", "warn"],
     datasources: {
       db: {
-        url: env.DATABASE_URL,
+        url: env.DIRECT_URL,
       },
     },
   });
