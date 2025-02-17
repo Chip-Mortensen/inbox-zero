@@ -1,10 +1,12 @@
 import { withServerActionInstrumentation } from "@sentry/nextjs";
 import { createScopedLogger } from "@/utils/logger";
-import type { ServerActionResponse } from "@/utils/error";
+import type { ServerActionResponse, ActionError } from "@/utils/error";
 
 const logger = createScopedLogger("instrumentation");
 
-type EnsureObject<T> = T extends object ? T : never;
+type ActionResult<T> = T extends object
+  ? T & { success: boolean }
+  : { success: boolean };
 
 export function withActionInstrumentation<
   Args extends any[],
@@ -17,9 +19,7 @@ export function withActionInstrumentation<
 ) {
   return async (
     ...args: Args
-  ): Promise<
-    ServerActionResponse<EnsureObject<Result> & { success: boolean }, Err>
-  > => {
+  ): Promise<ServerActionResponse<ActionResult<Result>, Err>> => {
     try {
       const result = await withServerActionInstrumentation(
         name,
@@ -32,25 +32,19 @@ export function withActionInstrumentation<
             const res = await action(...args);
 
             if (!res) {
-              return { success: true } as EnsureObject<Result> & {
-                success: boolean;
-              };
+              return { success: true } as unknown as ActionResult<Result>;
             }
 
-            if ("error" in res) return res;
+            if ("error" in res) {
+              return res as ActionError<Err>;
+            }
 
-            return {
-              success: true,
-              ...res,
-            } as unknown as EnsureObject<Result> & {
-              success: true;
-            };
+            return { ...res, success: true } as unknown as ActionResult<Result>;
           } catch (error) {
             logger.error("Error in action", { action: name, error });
             return {
               error: "An error occurred",
-              success: false,
-            } as ServerActionResponse<Result, Err>;
+            } as ActionError<Err>;
           }
         },
       );
@@ -60,8 +54,7 @@ export function withActionInstrumentation<
       logger.error("Error in action", { action: name, error });
       return {
         error: "An error occurred",
-        success: false,
-      } as ServerActionResponse<Result, Err>;
+      } as ActionError<Err>;
     }
   };
 }
