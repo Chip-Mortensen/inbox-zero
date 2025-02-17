@@ -3,8 +3,8 @@
 import { z } from "zod";
 import { auth } from "@/app/api/auth/[...nextauth]/auth";
 import { createScopedLogger } from "@/utils/logger";
-import type { ServerActionResponse } from "@/utils/actions";
-import { withActionInstrumentation } from "@/utils/instrumentation";
+import type { ServerActionResponse } from "@/utils/error";
+import { withActionInstrumentation } from "../instrumentation";
 
 const logger = createScopedLogger("calendar");
 
@@ -20,12 +20,13 @@ const createCalendarEventSchema = z.object({
 });
 
 type CreateCalendarEventBody = z.infer<typeof createCalendarEventSchema>;
+type CalendarEventResult = { success: true; error: "" };
 
 export const createCalendarEventAction = withActionInstrumentation(
   "createCalendarEvent",
   async (
     unsafeData: CreateCalendarEventBody,
-  ): Promise<ServerActionResponse> => {
+  ): Promise<ServerActionResponse<CalendarEventResult>> => {
     const session = await auth();
     if (!session?.accessToken) return { error: "Not authenticated" };
 
@@ -69,7 +70,7 @@ export const createCalendarEventAction = withActionInstrumentation(
       const event = await response.json();
       logger.info("Created calendar event", { eventId: event.id });
 
-      return { success: true };
+      return { success: true, error: "" };
     } catch (error) {
       logger.error("Error creating calendar event", { error });
       return { error: "Failed to create calendar event" };
