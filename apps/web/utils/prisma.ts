@@ -10,7 +10,7 @@ declare global {
 
 const prismaClientSingleton = () => {
   const client = new PrismaClient({
-    log: ["error", "warn"],
+    log: ["error", "warn", "query"],
     datasources: {
       db: {
         url: env.DATABASE_URL,
@@ -18,51 +18,70 @@ const prismaClientSingleton = () => {
     },
   });
 
-  // Add middleware for error handling
+  let isConnected = false;
+  let reconnectAttempt = 0;
+  const MAX_RECONNECT_ATTEMPTS = 3;
+
+  // Add middleware for connection management
   client.$use(async (params, next) => {
     try {
-      return await next(params);
+      // If we're not connected, try to connect first
+      if (!isConnected) {
+        await connectWithRetry(client);
+        isConnected = true;
+        reconnectAttempt = 0;
+      }
+
+      const result = await next(params);
     } catch (error) {
       const e = error as Error;
       const isSSLError =
         e.message?.includes("SSL") || e.message?.includes("exchange_error");
       const isMaxConns = e.message?.includes("Max client connections reached");
+      const isTimeout = e.message?.includes("Timeout");
 
-      logger.error("Prisma error", { error: e, isSSLError, isMaxConns });
+      logger.error("Prisma error", {
+        error: e,
+        isSSLError,
+        isMaxConns,
+        isTimeout,
+        operation: params.action,
+        model: params.model,
+        reconnectAttempt,
+      });
 
-      if (isMaxConns) {
-        logger.warn("Max connections reached, forcing disconnect");
-        try {
-          await client.$disconnect();
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          await connectWithRetry(client, 3, 50);
-          return next(params);
-        } catch (reconnectError) {
-          logger.error("Failed to reconnect after max connections error", {
-            error: reconnectError,
+      // Only attempt reconnection if we haven't exceeded the limit
+      if (reconnectAttempt < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttempt++;
+        isConnected = false;
+
+        if (isMaxConns || isSSLError || isTimeout) {
+          logger.warn("Connection issue detected, attempting reconnect", {
+            attempt: reconnectAttempt,
+            maxAttempts: MAX_RECONNECT_ATTEMPTS,
           });
-        }
-      } else if (isSSLError) {
-        logger.warn(
-          "SSL/Exchange error detected, attempting immediate reconnect",
-        );
-        try {
-          await client.$disconnect();
-          await connectWithRetry(client, 3, 100);
-          return next(params);
-        } catch (reconnectError) {
-          logger.error("Failed to reconnect after SSL error", {
-            error: reconnectError,
-          });
+
+          try {
+            await client.$disconnect();
+            await new Promise((resolve) =>
+              setTimeout(resolve, 1000 * reconnectAttempt),
+            );
+            await connectWithRetry(client, 2, 1000 * reconnectAttempt);
+            isConnected = true;
+            return next(params);
+          } catch (reconnectError) {
+            logger.error("Failed to reconnect", {
+              error: reconnectError,
+              attempt: reconnectAttempt,
+            });
+          }
         }
       } else {
-        try {
-          await connectWithRetry(client);
-          return next(params);
-        } catch (error) {
-          logger.error("Failed to reconnect prisma client", { error });
-        }
+        logger.error("Max reconnection attempts reached", {
+          maxAttempts: MAX_RECONNECT_ATTEMPTS,
+        });
       }
+
       throw error;
     }
   });
@@ -78,7 +97,7 @@ if (process.env.NODE_ENV !== "production") {
 
 async function connectWithRetry(
   client: PrismaClient,
-  retries = 5,
+  retries = 2,
   backoffMs = 1000,
 ): Promise<void> {
   try {
