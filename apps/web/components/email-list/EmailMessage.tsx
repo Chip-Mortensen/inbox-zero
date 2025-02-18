@@ -50,14 +50,21 @@ export function EmailMessage({
 }) {
   const [showReply, setShowReply] = useState(defaultShowReply || false);
   const [showDetails, setShowDetails] = useState(false);
+  const [draftContent, setDraftContent] = useState<string>();
 
-  const onReply = useCallback(() => setShowReply(true), []);
+  const onReply = useCallback((content?: string) => {
+    console.log("📨 EmailMessage.onReply called", { content });
+    setDraftContent(content);
+    setShowReply(true);
+  }, []);
+
   const [showForward, setShowForward] = useState(false);
   const onForward = useCallback(() => setShowForward(true), []);
 
   const onCloseCompose = useCallback(() => {
     setShowReply(false);
     setShowForward(false);
+    setDraftContent(undefined);
   }, []);
 
   const toggleDetails = useCallback((e: React.MouseEvent) => {
@@ -112,6 +119,7 @@ export function EmailMessage({
           <CalendarEventButton
             subject={message.headers.subject}
             content={message.textPlain || message.textHtml || ""}
+            onReply={onReply}
           />
 
           {(showReply || showForward) && (
@@ -124,6 +132,7 @@ export function EmailMessage({
               showReply={showReply}
               draftMessage={draftMessage}
               generateNudge={generateNudge}
+              draftContent={draftContent}
             />
           )}
         </>
@@ -146,7 +155,7 @@ function TopBar({
   showDetails: boolean;
   toggleDetails: (e: React.MouseEvent) => void;
   showReplyButton: boolean;
-  onReply: () => void;
+  onReply: (content?: string) => void;
   onForward: () => void;
 }) {
   return (
@@ -184,7 +193,7 @@ function TopBar({
         {showReplyButton && (
           <div className="relative flex items-center">
             <Tooltip content="Reply">
-              <Button variant="ghost" size="icon" onClick={onReply}>
+              <Button variant="ghost" size="icon" onClick={() => onReply()}>
                 <ReplyIcon className="h-4 w-4" />
                 <span className="sr-only">Reply</span>
               </Button>
@@ -211,6 +220,7 @@ function ReplyPanel({
   showReply,
   draftMessage,
   generateNudge,
+  draftContent,
 }: {
   message: ParsedMessage;
   refetch: () => void;
@@ -220,20 +230,12 @@ function ReplyPanel({
   showReply: boolean;
   draftMessage?: ThreadMessage;
   generateNudge?: boolean;
+  draftContent?: string;
 }) {
   const replyRef = useRef<HTMLDivElement>(null);
 
   const [isGeneratingNudge, setIsGeneratingNudge] = useState(false);
   const [nudge, setNudge] = useState<string | null>(null);
-  // scroll to the reply panel when it first opens
-  useEffect(() => {
-    if (defaultShowReply && replyRef.current) {
-      // hacky using setTimeout
-      setTimeout(() => {
-        replyRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-      }, 500);
-    }
-  }, [defaultShowReply]);
 
   useEffect(() => {
     async function loadNudge() {
@@ -268,27 +270,44 @@ function ReplyPanel({
   }, [generateNudge, message]);
 
   const replyingToEmail: ReplyingToEmail = useMemo(() => {
+    console.log("📝 Preparing replyingToEmail", {
+      showReply,
+      draftContent,
+      hasNudge: !!nudge,
+      hasDraftMessage: !!draftMessage,
+      contentLength: draftContent?.length,
+      contentPreview: draftContent?.slice(0, 50),
+    });
+
     if (showReply) {
-      if (draftMessage) return prepareDraftReplyEmail(draftMessage);
+      if (draftMessage) {
+        console.log("📤 Using draft message");
+        return prepareDraftReplyEmail(draftMessage);
+      }
 
-      // use nudge if available
       if (nudge) {
-        // Convert nudge text into HTML paragraphs
+        console.log("📤 Using nudge");
         const nudgeHtml = nudge
-          ? nudge
-              .split("\n")
-              .filter((line) => line.trim())
-              .map((line) => `<p>${line}</p>`)
-              .join("")
-          : "";
-
+          .split("\n")
+          .filter((line) => line.trim())
+          .map((line) => `<p>${line}</p>`)
+          .join("");
         return prepareReplyingToEmail(message, nudgeHtml);
       }
 
+      if (draftContent) {
+        console.log("📤 Using draft content", {
+          contentLength: draftContent.length,
+          contentPreview: draftContent.slice(0, 50),
+        });
+        return prepareReplyingToEmail(message, draftContent);
+      }
+
+      console.log("📤 Using empty content");
       return prepareReplyingToEmail(message);
     }
     return prepareForwardingEmail(message);
-  }, [showReply, message, draftMessage, nudge]);
+  }, [showReply, message, draftMessage, nudge, draftContent]);
 
   return (
     <>
@@ -332,9 +351,17 @@ const prepareReplyingToEmail = (
 ): ReplyingToEmail => {
   const sentFromUser = message.labelIds?.includes("SENT");
 
+  console.log("📧 Preparing reply email", {
+    hasContent: !!content,
+    contentLength: content?.length,
+    contentPreview: content?.slice(0, 100),
+    hasHtmlTags: content?.includes("<"),
+    hasLink: content?.includes("href="),
+  });
+
   const { html } = createReplyContent({ message });
 
-  return {
+  const replyEmail = {
     // If following an email from yourself, use original recipients, otherwise reply to sender
     to: sentFromUser ? message.headers.to : message.headers.from,
     // If following an email from yourself, don't add "Re:" prefix
@@ -351,6 +378,15 @@ const prepareReplyingToEmail = (
     draftHtml: content || "",
     quotedContentHtml: html,
   };
+
+  console.log("📧 Created reply email", {
+    draftHtmlLength: replyEmail.draftHtml.length,
+    draftHtmlPreview: replyEmail.draftHtml.slice(0, 100),
+    hasHtmlTags: replyEmail.draftHtml.includes("<"),
+    hasLink: replyEmail.draftHtml.includes("href="),
+  });
+
+  return replyEmail;
 };
 
 const prepareForwardingEmail = (message: ParsedMessage): ReplyingToEmail => ({

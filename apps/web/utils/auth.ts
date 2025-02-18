@@ -107,6 +107,8 @@ export const SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.settings.basic",
   "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.events.freebusy",
+  "https://www.googleapis.com/auth/calendar.freebusy",
   ...(env.NEXT_PUBLIC_CONTACTS_ENABLED
     ? ["https://www.googleapis.com/auth/contacts"]
     : []),
