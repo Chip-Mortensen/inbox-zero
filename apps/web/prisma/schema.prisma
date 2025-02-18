@@ -102,6 +102,7 @@ model User {
   categories        Category[]
   threadTrackers    ThreadTracker[]
   unsubscribeTokens EmailToken[]
+  calendarEvents    CalendarEventCreated[]
 
   @@index([lastSummaryEmailAt])
 }
@@ -507,4 +508,24 @@ enum ThreadTrackerType {
   AWAITING // We're waiting for their reply
   NEEDS_REPLY // We need to reply to this
   NEEDS_ACTION // We need to do something else
+}
+
+model CalendarEventCreated {
+  id          String   @id @default(cuid())
+  userId      String
+  threadId    String   // Gmail thread ID
+  messageId   String   // Gmail message ID
+  createdAt   DateTime @default(now())
+  summary     String
+  description String
+  startTime   String   // ISO string
+  endTime     String   // ISO string
+  timeZone    String
+  attendees   String[] // Array of email addresses
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, threadId, messageId])
+  @@index([userId])
+  @@index([threadId])
+  @@index([messageId])
 }

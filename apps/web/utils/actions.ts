@@ -10,5 +10,5 @@ export type ServerActionResponse<
 export function isActionError<T extends object | undefined, E extends object>(
   result: ServerActionResponse<T, E>,
 ): result is ActionError<E> {
-  return result !== undefined && "error" in result;
+  return result !== undefined && "error" in result && result.error !== "";
 }

@@ -10,6 +10,7 @@ import type {
   TimeProposal,
   SuggestTimesResponse,
 } from "@/app/api/calendar/suggest-times/route";
+import prisma from "@/utils/prisma";
 
 const logger = createScopedLogger("calendar");
 
@@ -50,6 +51,12 @@ export const checkCalendarConflictsAction = withActionInstrumentation(
         new Date(data.endTime).getTime() + 2 * 60 * 60 * 1000,
       ).toISOString();
 
+      logger.info("Calendar API request params", {
+        timeMin,
+        timeMax,
+        timeZone: data.timeZone,
+      });
+
       const response = await fetch(
         `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${timeMin}&timeMax=${timeMax}&timeZone=${data.timeZone}&singleEvents=true`,
         {
@@ -65,13 +72,23 @@ export const checkCalendarConflictsAction = withActionInstrumentation(
           error,
           status: response.status,
           statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries()),
         });
         return { error: "Failed to fetch calendar events" };
       }
 
       const { items } = await response.json();
-      logger.info("Retrieved calendar events", {
+      logger.info("Calendar API response", {
         numEvents: items?.length ?? 0,
+        timeRange: { timeMin, timeMax },
+        firstEvent: items?.[0]
+          ? {
+              id: items[0].id,
+              summary: items[0].summary,
+              start: items[0].start,
+              end: items[0].end,
+            }
+          : null,
       });
 
       if (!items) {
@@ -134,14 +151,33 @@ export const checkCalendarConflictsAction = withActionInstrumentation(
 export const createCalendarEventAction = withActionInstrumentation(
   "createCalendarEvent",
   async (
-    unsafeData: CreateCalendarEventBody,
+    unsafeData: CreateCalendarEventBody & {
+      threadId?: string;
+      messageId?: string;
+    },
   ): Promise<ServerActionResponse<CalendarEventResult>> => {
     const session = await auth();
     if (!session?.accessToken) return { error: "Not authenticated" };
+    const userId = session.user.id;
 
     const { data, success, error } =
       createCalendarEventSchema.safeParse(unsafeData);
-    if (!success) return { error: error.message };
+    if (!success) {
+      logger.error("Invalid calendar event data", {
+        error: error.message,
+        issues: error.issues,
+      });
+      return { error: error.message };
+    }
+
+    logger.info("Creating calendar event", {
+      summary: data.summary,
+      startTime: data.startTime,
+      endTime: data.endTime,
+      timeZone: data.timeZone,
+      hasAttendees: !!data.attendees?.length,
+      attendeesCount: data.attendees?.length,
+    });
 
     // Check for conflicts first
     const conflictCheck = await checkCalendarConflictsAction({
@@ -150,11 +186,17 @@ export const createCalendarEventAction = withActionInstrumentation(
       timeZone: data.timeZone,
     });
 
-    if ("error" in conflictCheck) {
+    if ("error" in conflictCheck && conflictCheck.error) {
+      logger.error("Conflict check failed during event creation", {
+        error: conflictCheck.error,
+      });
       return { error: conflictCheck.error };
     }
 
     if (conflictCheck.hasConflicts) {
+      logger.warn("Found conflicts during event creation", {
+        conflicts: conflictCheck.conflicts,
+      });
       return {
         error: "There are calendar conflicts during this time",
         conflicts: conflictCheck.conflicts,
@@ -162,6 +204,26 @@ export const createCalendarEventAction = withActionInstrumentation(
     }
 
     try {
+      const requestBody = {
+        summary: data.summary,
+        description: data.description,
+        start: {
+          dateTime: data.startTime,
+          timeZone: data.timeZone,
+        },
+        end: {
+          dateTime: data.endTime,
+          timeZone: data.timeZone,
+        },
+        attendees: data.attendees?.map((email) => ({ email })),
+      };
+
+      logger.info("Calendar API request", {
+        url: "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        requestBody,
+        accessTokenLength: session.accessToken.length,
+      });
+
       const response = await fetch(
         "https://www.googleapis.com/calendar/v3/calendars/primary/events",
         {
@@ -170,36 +232,80 @@ export const createCalendarEventAction = withActionInstrumentation(
             Authorization: `Bearer ${session.accessToken}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            summary: data.summary,
-            description: data.description,
-            start: {
-              dateTime: data.startTime,
-              timeZone: data.timeZone,
-            },
-            end: {
-              dateTime: data.endTime,
-              timeZone: data.timeZone,
-            },
-            attendees: data.attendees?.map((email) => ({ email })),
-          }),
+          body: JSON.stringify(requestBody),
         },
       );
 
+      logger.info("Calendar API response status", {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+      });
+
+      const responseData = await response.json();
+
       if (!response.ok) {
-        const errorData = await response.json();
-        logger.error("Failed to create calendar event", { error: errorData });
+        logger.error("Failed to create calendar event", {
+          error: responseData,
+          status: response.status,
+          statusText: response.statusText,
+          responseData,
+        });
         return {
-          error: errorData.error?.message || "Failed to create calendar event",
+          error:
+            responseData.error?.message || "Failed to create calendar event",
         };
       }
 
-      const event = await response.json();
-      logger.info("Created calendar event", { eventId: event.id });
+      // Track the created event if we have thread and message IDs
+      if (unsafeData.threadId && unsafeData.messageId) {
+        try {
+          await prisma.calendarEventCreated.create({
+            data: {
+              userId,
+              threadId: unsafeData.threadId,
+              messageId: unsafeData.messageId,
+              summary: data.summary,
+              description: data.description,
+              startTime: data.startTime,
+              endTime: data.endTime,
+              timeZone: data.timeZone,
+              attendees: data.attendees || [],
+            },
+          });
+          logger.info("Tracked calendar event creation", {
+            userId,
+            threadId: unsafeData.threadId,
+            messageId: unsafeData.messageId,
+            summary: data.summary,
+            startTime: data.startTime,
+          });
+        } catch (error) {
+          // Don't fail the whole action if tracking fails
+          logger.error("Failed to track calendar event creation", {
+            error,
+            userId,
+            threadId: unsafeData.threadId,
+            messageId: unsafeData.messageId,
+          });
+        }
+      }
+
+      logger.info("Created calendar event", {
+        eventId: responseData.id,
+        eventSummary: responseData.summary,
+        start: responseData.start,
+        end: responseData.end,
+        responseData,
+      });
 
       return { success: true, error: "" };
     } catch (error) {
-      logger.error("Error creating calendar event", { error });
+      logger.error("Error creating calendar event", {
+        error,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+        errorStack: error instanceof Error ? error.stack : undefined,
+      });
       return { error: "Failed to create calendar event" };
     }
   },
