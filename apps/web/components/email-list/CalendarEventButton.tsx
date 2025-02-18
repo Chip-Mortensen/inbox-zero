@@ -3,12 +3,13 @@
 import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Calendar, XCircle } from "lucide-react";
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import type { AnalyzeCalendarResponse } from "@/app/api/analyze/calendar/route";
 import {
   createCalendarEventAction,
   getAlternativeTimesAction,
   checkCalendarConflictsAction,
+  updateCalendarEventAction,
 } from "@/utils/actions/calendar";
 import { toastError, toastSuccess } from "@/components/Toast";
 import { isActionError } from "@/utils/actions";
@@ -100,6 +101,7 @@ export const CalendarEventButton = ({
       endTime: string;
       timeZone: string;
       attendees: string[];
+      googleEventId: string;
     };
   }>(
     message.id ? [`/api/calendar/event-created`, message.id] : null,
@@ -311,14 +313,9 @@ export const CalendarEventButton = ({
         toastSuccess({
           description: "Calendar event created!",
         });
-        setModifiedEvent({
-          startTime:
-            analysis.suggestedEvent.startTime || new Date().toISOString(),
-          endTime:
-            analysis.suggestedEvent.endTime ||
-            new Date(Date.now() + 3600000).toISOString(),
-        });
         setEventCreated(true);
+        // Revalidate the event data
+        await mutate([`/api/calendar/event-created`, message.id]);
       }
     } finally {
       setIsCreating(false);
@@ -388,20 +385,94 @@ export const CalendarEventButton = ({
     startTime: string;
     endTime: string;
     attendees?: string;
-  }) => {
-    if (!analysis?.suggestedEvent) return;
+  }): Promise<void> => {
+    console.log("🚀 Starting event modification", {
+      hasAnalysis: !!analysis?.suggestedEvent,
+      hasEventData: !!eventCreatedData?.event?.googleEventId,
+      isEventCreated: eventCreated,
+      formData,
+    });
+
+    // Allow modification with either the real event data or the suggested event data
+    if (
+      !analysis?.suggestedEvent ||
+      (!eventCreatedData?.event?.googleEventId && !eventCreated)
+    ) {
+      console.log("❌ Modification blocked - missing required data", {
+        hasAnalysis: !!analysis?.suggestedEvent,
+        hasEventData: !!eventCreatedData?.event?.googleEventId,
+        isEventCreated: eventCreated,
+      });
+      setIsCreating(false);
+      return;
+    }
 
     setIsCreating(true);
     try {
-      console.log("📅 Starting event modification", {
-        originalStartTime: analysis.suggestedEvent.startTime,
-        originalEndTime: analysis.suggestedEvent.endTime,
-        formData: {
-          date: formData.date,
-          startTime: formData.startTime,
-          endTime: formData.endTime,
-        },
+      // Get the event data, either from existing data or by fetching it
+      let eventData = eventCreatedData?.event;
+      console.log("📝 Initial event data", {
+        hasEventData: !!eventData,
+        googleEventId: eventData?.googleEventId,
       });
+
+      // Wait for event data if we just created it
+      if (!eventData?.googleEventId) {
+        console.log("⏳ Waiting for event data...");
+        // First wait a moment for the database to be updated
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Then fetch the latest data and wait for it
+        console.log("🔄 Fetching updated event data...");
+        // Trigger revalidation and wait for the new data
+        await mutate([`/api/calendar/event-created`, message.id]);
+        // Wait another moment for the data to be available
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Get the latest data
+        const latestData = await fetch(`/api/calendar/event-created`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            threadId: message.threadId,
+            messageId: message.id,
+          }),
+        }).then((res) => res.json());
+
+        console.log("📥 Received updated data", {
+          hasData: !!latestData,
+          hasEvent: !!latestData?.event,
+          hasGoogleId: !!latestData?.event?.googleEventId,
+          googleId: latestData?.event?.googleEventId,
+        });
+
+        // If we still don't have the event data, show an error
+        if (!latestData?.event?.googleEventId) {
+          console.log("❌ Failed to get event data after waiting");
+          toastError({
+            title: "Failed to modify event",
+            description: "Please wait a moment and try again",
+          });
+          setIsCreating(false);
+          return;
+        }
+
+        // Use the updated event data
+        eventData = latestData.event as NonNullable<typeof eventData>;
+        console.log("✅ Successfully got updated event data", {
+          googleEventId: eventData.googleEventId,
+        });
+      }
+
+      // At this point we know eventData is defined and has a googleEventId
+      if (!eventData) {
+        console.log("❌ Event data missing after updates");
+        toastError({
+          title: "Failed to modify event",
+          description: "Event data is missing",
+        });
+        setIsCreating(false);
+        return;
+      }
 
       // Parse the time inputs (they come in 24h format from the time input)
       const [startHour, startMinute] = formData.startTime
@@ -409,31 +480,28 @@ export const CalendarEventButton = ({
         .map(Number);
       const [endHour, endMinute] = formData.endTime.split(":").map(Number);
 
-      console.log("⏰ Parsed time values", {
-        start: { hour: startHour, minute: startMinute },
-        end: { hour: endHour, minute: endMinute },
-        isValid:
-          !isNaN(startHour) &&
-          !isNaN(startMinute) &&
-          !isNaN(endHour) &&
-          !isNaN(endMinute),
-      });
-
       if (
         isNaN(startHour) ||
         isNaN(startMinute) ||
         isNaN(endHour) ||
         isNaN(endMinute)
       ) {
+        console.log("❌ Invalid time format", {
+          startHour,
+          startMinute,
+          endHour,
+          endMinute,
+        });
         toastError({
           title: "Invalid time format",
           description: "Please enter valid times in HH:MM format",
         });
+        setIsCreating(false);
         return;
       }
 
       const timeZone =
-        analysis.suggestedEvent.timeZone ||
+        analysis.suggestedEvent?.timeZone ||
         Intl.DateTimeFormat().resolvedOptions().timeZone;
 
       // Create dates in the correct timezone
@@ -449,78 +517,58 @@ export const CalendarEventButton = ({
         endDate.toLocaleString("en-US", { timeZone }),
       ).toISOString();
 
-      console.log("🌍 Date conversion results", {
+      console.log("⏰ Processed dates", {
         timeZone,
-        startDate: {
-          original: startDate.toISOString(),
-          converted: startISOString,
-          localString: startDate.toLocaleString(),
-        },
-        endDate: {
-          original: endDate.toISOString(),
-          converted: endISOString,
-          localString: endDate.toLocaleString(),
-        },
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        startISOString,
+        endISOString,
       });
 
       // Validate that end time is after start time
       if (endDate <= startDate) {
+        console.log("❌ Invalid time range - end before start");
         toastError({
           title: "Invalid time range",
           description: "End time must be after start time",
         });
+        setIsCreating(false);
         return;
       }
 
       // Check for conflicts
-      console.log("🔍 Checking conflicts with params", {
-        startTime: startISOString,
-        endTime: endISOString,
-        timeZone,
-      });
-
+      console.log("🔍 Checking for conflicts...");
       const conflictCheck = await checkCalendarConflictsAction({
         startTime: startISOString,
         endTime: endISOString,
         timeZone,
-      });
-
-      console.log("✅ Conflict check response", {
-        isError: isActionError(conflictCheck),
-        error: isActionError(conflictCheck) ? conflictCheck.error : undefined,
-        hasConflicts:
-          !isActionError(conflictCheck) && conflictCheck.hasConflicts,
-        response: conflictCheck,
+        excludeEventId: eventData.googleEventId,
       });
 
       if (isActionError(conflictCheck) && conflictCheck.error) {
+        console.log("❌ Conflict check failed", { error: conflictCheck.error });
         toastError({
           title: "Failed to check calendar conflicts",
           description: conflictCheck.error,
         });
+        setIsCreating(false);
         return;
       }
 
       // If there are conflicts, show error and don't create event
       if (!isActionError(conflictCheck) && conflictCheck.hasConflicts) {
+        console.log("❌ Found conflicts with existing events");
         toastError({
           title: "Calendar Conflict",
           description:
             "There are conflicts with existing events. Please choose a different time.",
         });
+        setIsCreating(false);
         return;
       }
 
-      console.log("📅 Creating calendar event with params", {
-        summary: formData.summary,
-        description: formData.description,
-        startTime: startISOString,
-        endTime: endISOString,
-        timeZone,
-        hasAttendees: !!formData.attendees,
-      });
-
-      const result = await createCalendarEventAction({
+      console.log("✅ No conflicts found, updating event...");
+      const result = await updateCalendarEventAction({
         summary: formData.summary,
         description: formData.description,
         startTime: startISOString,
@@ -529,32 +577,52 @@ export const CalendarEventButton = ({
         attendees: formData.attendees
           ? formData.attendees.split(",").map((email) => email.trim())
           : undefined,
-        threadId: message.threadId,
-        messageId: message.id,
-      });
-
-      console.log("📅 Calendar event creation response", {
-        isError: isActionError(result),
-        error: isActionError(result) ? result.error : undefined,
-        result,
+        googleEventId: eventData.googleEventId,
       });
 
       if (isActionError(result) && result.error) {
+        console.log("❌ Failed to update event", { error: result.error });
         toastError({
-          title: "Failed to create calendar event",
+          title: "Failed to update calendar event",
           description: result.error,
         });
-      } else {
-        toastSuccess({
-          description: "Calendar event updated!",
-        });
-        setModifiedEvent({
+        setIsCreating(false);
+        return;
+      }
+
+      console.log("✅ Event updated successfully");
+      toastSuccess({
+        description: "Calendar event updated!",
+      });
+
+      // Update both the SWR cache and local state
+      const updatedEvent = {
+        exists: true,
+        event: {
+          ...eventData,
+          summary: formData.summary,
+          description: formData.description,
           startTime: startISOString,
           endTime: endISOString,
-        });
-        setEventCreated(true);
-        setShowModifyForm(false);
-      }
+          timeZone,
+          attendees: formData.attendees
+            ? formData.attendees.split(",").map((email) => email.trim())
+            : eventData.attendees,
+        },
+      };
+
+      // Update the local state for immediate UI update
+      setModifiedEvent({
+        startTime: startISOString,
+        endTime: endISOString,
+      });
+
+      // Update the SWR cache
+      await mutate([`/api/calendar/event-created`, message.id], updatedEvent, {
+        revalidate: true,
+      });
+
+      setShowModifyForm(false);
     } finally {
       setIsCreating(false);
     }
@@ -580,56 +648,207 @@ export const CalendarEventButton = ({
       ) : null;
     }
 
-    // If event was already created, just show the success message
-    if (eventCreatedData?.exists && eventCreatedData.event) {
+    // If event was already created or we just created it, show the success message
+    if ((eventCreatedData?.exists && eventCreatedData.event) || eventCreated) {
+      const event = eventCreatedData?.event;
+
+      // If we just created the event but don't have the data yet, show a temporary view
+      if (!event && eventCreated && analysis?.suggestedEvent) {
+        return (
+          <div className="mt-4 rounded-lg border border-green-100 bg-green-50/50 p-4">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-green-700">
+                <Calendar className="h-4 w-4" />
+                <MessageText>✓ Event added to calendar</MessageText>
+              </div>
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-medium text-gray-900">
+                    {analysis.suggestedEvent.summary}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {analysis.suggestedEvent.description}
+                  </p>
+                  <div className="flex items-center space-x-2 text-sm text-gray-500">
+                    <Calendar className="h-4 w-4" />
+                    <time>
+                      {(() => {
+                        const displayStartTime =
+                          modifiedEvent?.startTime ||
+                          analysis.suggestedEvent.startTime ||
+                          new Date().toISOString();
+                        const displayEndTime =
+                          modifiedEvent?.endTime ||
+                          analysis.suggestedEvent.endTime ||
+                          new Date(Date.now() + 3600000).toISOString();
+
+                        return `${new Date(displayStartTime).toLocaleDateString(
+                          "en-US",
+                          {
+                            weekday: "long",
+                            year: "numeric",
+                            month: "numeric",
+                            day: "numeric",
+                          },
+                        )} at ${new Date(displayStartTime).toLocaleTimeString(
+                          [],
+                          {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          },
+                        )} - ${new Date(displayEndTime).toLocaleTimeString([], {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}`;
+                      })()}
+                    </time>
+                  </div>
+                  {analysis.suggestedEvent.attendees &&
+                    analysis.suggestedEvent.attendees.length > 0 && (
+                      <p className="text-sm text-gray-500">
+                        With: {analysis.suggestedEvent.attendees.join(", ")}
+                      </p>
+                    )}
+                </div>
+                <Button
+                  size="default"
+                  variant="outline"
+                  onClick={() => setShowModifyForm(true)}
+                  disabled={isCreating}
+                >
+                  <Calendar className="mr-2 h-4 w-4" />
+                  Modify Event
+                </Button>
+              </div>
+            </div>
+
+            {showModifyForm && (
+              <CalendarEventForm
+                isOpen={showModifyForm}
+                onClose={() => setShowModifyForm(false)}
+                onSubmit={handleModifyEvent}
+                initialValues={{
+                  summary: analysis.suggestedEvent.summary,
+                  description: analysis.suggestedEvent.description,
+                  date: new Date(
+                    analysis.suggestedEvent.startTime || new Date(),
+                  ),
+                  startTime: new Date(
+                    analysis.suggestedEvent.startTime || new Date(),
+                  ).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: false,
+                  }),
+                  endTime: new Date(
+                    analysis.suggestedEvent.endTime ||
+                      new Date(Date.now() + 3600000),
+                  ).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: false,
+                  }),
+                  attendees: analysis.suggestedEvent.attendees,
+                }}
+                isEditMode
+              />
+            )}
+          </div>
+        );
+      }
+
+      // If we don't have event data and no suggested event, return null
+      if (!event) return null;
+
       return (
         <div className="mt-4 rounded-lg border border-green-100 bg-green-50/50 p-4">
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-green-700">
               <Calendar className="h-4 w-4" />
-              <MessageText>✓ Event already added to calendar</MessageText>
+              <MessageText>✓ Event added to calendar</MessageText>
             </div>
-            <div className="space-y-1">
-              <h3 className="text-sm font-medium text-gray-900">
-                {eventCreatedData.event.summary}
-              </h3>
-              <p className="text-sm text-gray-500">
-                {eventCreatedData.event.description}
-              </p>
-              <div className="flex items-center space-x-2 text-sm text-gray-500">
-                <Calendar className="h-4 w-4" />
-                <time>
-                  {new Date(
-                    eventCreatedData.event.startTime,
-                  ).toLocaleDateString("en-US", {
-                    weekday: "long",
-                    year: "numeric",
-                    month: "numeric",
-                    day: "numeric",
-                  })}{" "}
-                  at{" "}
-                  {new Date(
-                    eventCreatedData.event.startTime,
-                  ).toLocaleTimeString([], {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                  {eventCreatedData.event.endTime &&
-                    ` - ${new Date(
-                      eventCreatedData.event.endTime,
-                    ).toLocaleTimeString([], {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}`}
-                </time>
+            <div className="flex items-start justify-between">
+              <div className="space-y-1">
+                <h3 className="text-sm font-medium text-gray-900">
+                  {event.summary}
+                </h3>
+                <p className="text-sm text-gray-500">{event.description}</p>
+                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                  <Calendar className="h-4 w-4" />
+                  <time>
+                    {(() => {
+                      const displayStartTime =
+                        modifiedEvent?.startTime || event.startTime;
+                      const displayEndTime =
+                        modifiedEvent?.endTime || event.endTime;
+
+                      if (!displayStartTime || !displayEndTime) {
+                        return "Loading...";
+                      }
+
+                      return `${new Date(displayStartTime).toLocaleDateString(
+                        "en-US",
+                        {
+                          weekday: "long",
+                          year: "numeric",
+                          month: "numeric",
+                          day: "numeric",
+                        },
+                      )} at ${new Date(displayStartTime).toLocaleTimeString(
+                        [],
+                        {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        },
+                      )} - ${new Date(displayEndTime).toLocaleTimeString([], {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}`;
+                    })()}
+                  </time>
+                </div>
+                {event.attendees && event.attendees.length > 0 && (
+                  <p className="text-sm text-gray-500">
+                    With: {event.attendees.join(", ")}
+                  </p>
+                )}
               </div>
-              {eventCreatedData.event.attendees?.length > 0 && (
-                <p className="text-sm text-gray-500">
-                  With: {eventCreatedData.event.attendees.join(", ")}
-                </p>
-              )}
+              <Button
+                size="default"
+                variant="outline"
+                onClick={() => setShowModifyForm(true)}
+                disabled={isCreating}
+              >
+                <Calendar className="mr-2 h-4 w-4" />
+                Modify Event
+              </Button>
             </div>
           </div>
+
+          {showModifyForm && (
+            <CalendarEventForm
+              isOpen={showModifyForm}
+              onClose={() => setShowModifyForm(false)}
+              onSubmit={handleModifyEvent}
+              initialValues={{
+                summary: event.summary,
+                description: event.description,
+                date: new Date(event.startTime),
+                startTime: new Date(event.startTime).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                }),
+                endTime: new Date(event.endTime).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                }),
+                attendees: event.attendees,
+              }}
+              isEditMode
+            />
+          )}
         </div>
       );
     }
@@ -681,34 +900,32 @@ export const CalendarEventButton = ({
             <div className="flex items-center space-x-2 text-sm text-gray-500">
               <Calendar className="h-4 w-4" />
               <time>
-                {new Date(
-                  modifiedEvent?.startTime ||
-                    analysis.suggestedEvent.startTime ||
-                    new Date().toISOString(),
-                ).toLocaleDateString("en-US", {
-                  weekday: "long",
-                  year: "numeric",
-                  month: "numeric",
-                  day: "numeric",
-                })}{" "}
-                at{" "}
-                {new Date(
-                  modifiedEvent?.startTime ||
-                    analysis.suggestedEvent.startTime ||
-                    new Date().toISOString(),
-                ).toLocaleTimeString([], {
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-                {(modifiedEvent?.endTime || analysis.suggestedEvent.endTime) &&
-                  ` - ${new Date(
+                {(() => {
+                  const displayStartTime =
+                    modifiedEvent?.startTime ||
+                    analysis.suggestedEvent?.startTime ||
+                    new Date().toISOString();
+                  const displayEndTime =
                     modifiedEvent?.endTime ||
-                      analysis.suggestedEvent.endTime ||
-                      new Date().toISOString(),
-                  ).toLocaleTimeString([], {
+                    analysis.suggestedEvent?.endTime ||
+                    new Date(Date.now() + 3600000).toISOString();
+
+                  return `${new Date(displayStartTime).toLocaleDateString(
+                    "en-US",
+                    {
+                      weekday: "long",
+                      year: "numeric",
+                      month: "numeric",
+                      day: "numeric",
+                    },
+                  )} at ${new Date(displayStartTime).toLocaleTimeString([], {
                     hour: "numeric",
                     minute: "2-digit",
-                  })}`}
+                  })} - ${new Date(displayEndTime).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}`;
+                })()}
               </time>
             </div>
             {analysis.suggestedEvent.attendees &&

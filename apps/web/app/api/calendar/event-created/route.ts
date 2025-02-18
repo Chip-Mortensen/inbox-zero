@@ -12,6 +12,21 @@ const RequestSchema = z.object({
   messageId: z.string(),
 });
 
+const EventResponseSchema = z.object({
+  summary: z.string(),
+  description: z.string(),
+  startTime: z.string(),
+  endTime: z.string(),
+  timeZone: z.string(),
+  attendees: z.array(z.string()),
+  googleEventId: z.string(),
+});
+
+export type EventCreatedResponse = {
+  exists: boolean;
+  event?: z.infer<typeof EventResponseSchema>;
+};
+
 export const POST = withError(async (request: Request) => {
   const session = await auth();
   if (!session?.user?.id) {
@@ -44,6 +59,7 @@ export const POST = withError(async (request: Request) => {
         endTime: true,
         timeZone: true,
         attendees: true,
+        googleEventId: true,
       },
     });
 
@@ -53,12 +69,28 @@ export const POST = withError(async (request: Request) => {
       messageId,
       exists: !!eventCreated,
       summary: eventCreated?.summary,
+      googleEventId: eventCreated?.googleEventId,
     });
+
+    // Validate the response
+    if (eventCreated) {
+      const eventResult = EventResponseSchema.safeParse(eventCreated);
+      if (!eventResult.success) {
+        logger.error("Invalid event data in database", {
+          error: eventResult.error.message,
+          eventCreated,
+        });
+        return NextResponse.json(
+          { error: "Invalid event data in database" },
+          { status: 500 },
+        );
+      }
+    }
 
     return NextResponse.json({
       exists: !!eventCreated,
       event: eventCreated,
-    });
+    } satisfies EventCreatedResponse);
   } catch (error) {
     logger.error("Error checking calendar event creation", {
       error,

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { cn } from "@/utils";
+import { format } from "date-fns";
 
 const calendarEventFormSchema = z.object({
   summary: z.string().min(1, "Title is required"),
@@ -43,6 +44,7 @@ interface CalendarEventFormProps {
     date: Date;
     attendees?: string[];
   };
+  isEditMode?: boolean;
 }
 
 export function CalendarEventForm({
@@ -50,6 +52,7 @@ export function CalendarEventForm({
   onClose,
   onSubmit,
   initialValues,
+  isEditMode = false,
 }: CalendarEventFormProps) {
   const {
     register,
@@ -78,23 +81,26 @@ export function CalendarEventForm({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>Modify Calendar Event</DialogTitle>
+          <DialogTitle>
+            {isEditMode ? "Modify Calendar Event" : "Create Calendar Event"}
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
           <Input
             type="text"
             name="summary"
             label="Title"
-            registerProps={register("summary")}
+            registerProps={register("summary", { required: true })}
             error={errors.summary}
           />
           <Input
             type="text"
+            autosizeTextarea
+            rows={3}
             name="description"
             label="Description"
-            autosizeTextarea
             registerProps={register("description")}
             error={errors.description}
           />
@@ -111,12 +117,7 @@ export function CalendarEventForm({
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {selectedDate ? (
-                    selectedDate.toLocaleDateString("en-US", {
-                      weekday: "long",
-                      year: "numeric",
-                      month: "numeric",
-                      day: "numeric",
-                    })
+                    format(selectedDate, "PPP")
                   ) : (
                     <span>Pick a date</span>
                   )}
@@ -137,31 +138,35 @@ export function CalendarEventForm({
               type="time"
               name="startTime"
               label="Start Time"
-              registerProps={register("startTime")}
+              registerProps={register("startTime", { required: true })}
               error={errors.startTime}
             />
             <Input
               type="time"
               name="endTime"
               label="End Time"
-              registerProps={register("endTime")}
+              registerProps={register("endTime", { required: true })}
               error={errors.endTime}
             />
           </div>
           <Input
             type="text"
             name="attendees"
-            label="Attendees"
-            placeholder="email1@example.com, email2@example.com"
+            label="Attendees (comma-separated emails)"
             registerProps={register("attendees")}
             error={errors.attendees}
           />
           <div className="flex justify-end space-x-2">
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
             <Button type="submit" loading={isSubmitting}>
-              Save Changes
+              {isEditMode ? "Update Event" : "Create Event"}
             </Button>
           </div>
         </form>

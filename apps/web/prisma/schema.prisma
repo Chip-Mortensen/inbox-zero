@@ -511,18 +511,19 @@ enum ThreadTrackerType {
 }
 
 model CalendarEventCreated {
-  id          String   @id @default(cuid())
-  userId      String
-  threadId    String   // Gmail thread ID
-  messageId   String   // Gmail message ID
-  createdAt   DateTime @default(now())
-  summary     String
-  description String
-  startTime   String   // ISO string
-  endTime     String   // ISO string
-  timeZone    String
-  attendees   String[] // Array of email addresses
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String   @id @default(cuid())
+  userId        String
+  threadId      String   // Gmail thread ID
+  messageId     String   // Gmail message ID
+  createdAt     DateTime @default(now())
+  summary       String
+  description   String
+  startTime     String   // ISO string
+  endTime       String   // ISO string
+  timeZone      String
+  attendees     String[] // Array of email addresses
+  googleEventId String   // Google Calendar event ID
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, threadId, messageId])
   @@index([userId])

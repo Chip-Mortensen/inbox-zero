@@ -25,13 +25,23 @@ const createCalendarEventSchema = z.object({
   attendees: z.array(z.string()).optional(),
 });
 
+const updateCalendarEventSchema = createCalendarEventSchema.extend({
+  googleEventId: z.string(),
+});
+
 type CreateCalendarEventBody = z.infer<typeof createCalendarEventSchema>;
+type UpdateCalendarEventBody = z.infer<typeof updateCalendarEventSchema>;
 type CalendarEventResult = { success: true; error: "" };
 
 export const checkCalendarConflictsAction = withActionInstrumentation(
   "checkCalendarConflicts",
   async (
-    data: Pick<CreateCalendarEventBody, "startTime" | "endTime" | "timeZone">,
+    data: Pick<
+      CreateCalendarEventBody,
+      "startTime" | "endTime" | "timeZone"
+    > & {
+      excludeEventId?: string;
+    },
   ): Promise<ServerActionResponse<ConflictCheckResponse>> => {
     const session = await auth();
     if (!session?.accessToken) return { error: "Not authenticated" };
@@ -97,6 +107,11 @@ export const checkCalendarConflictsAction = withActionInstrumentation(
 
       // Filter events that actually conflict
       const conflictingEvents = items.filter((event: any) => {
+        // Skip the event being edited
+        if (data.excludeEventId && event.id === data.excludeEventId) {
+          return false;
+        }
+
         const eventStart = new Date(event.start.dateTime || event.start.date);
         const eventEnd = new Date(event.end.dateTime || event.end.date);
         const proposedStart = new Date(data.startTime);
@@ -271,6 +286,7 @@ export const createCalendarEventAction = withActionInstrumentation(
               endTime: data.endTime,
               timeZone: data.timeZone,
               attendees: data.attendees || [],
+              googleEventId: responseData.id,
             },
           });
           logger.info("Tracked calendar event creation", {
@@ -279,6 +295,7 @@ export const createCalendarEventAction = withActionInstrumentation(
             messageId: unsafeData.messageId,
             summary: data.summary,
             startTime: data.startTime,
+            googleEventId: responseData.id,
           });
         } catch (error) {
           // Don't fail the whole action if tracking fails
@@ -378,6 +395,98 @@ export const getAlternativeTimesAction = withActionInstrumentation(
         stack: error instanceof Error ? error.stack : undefined,
       });
       return { error: "Failed to get alternative times" };
+    }
+  },
+);
+
+export const updateCalendarEventAction = withActionInstrumentation(
+  "updateCalendarEvent",
+  async (
+    unsafeData: UpdateCalendarEventBody,
+  ): Promise<ServerActionResponse<CalendarEventResult>> => {
+    const session = await auth();
+    if (!session?.accessToken) return { error: "Not authenticated" };
+
+    const { data, success, error } =
+      updateCalendarEventSchema.safeParse(unsafeData);
+    if (!success) {
+      logger.error("Invalid calendar event update data", {
+        error: error.message,
+        issues: error.issues,
+      });
+      return { error: error.message };
+    }
+
+    try {
+      const requestBody = {
+        summary: data.summary,
+        description: data.description,
+        start: {
+          dateTime: data.startTime,
+          timeZone: data.timeZone,
+        },
+        end: {
+          dateTime: data.endTime,
+          timeZone: data.timeZone,
+        },
+        attendees: data.attendees?.map((email) => ({ email })),
+      };
+
+      logger.info("Updating calendar event", {
+        googleEventId: data.googleEventId,
+        summary: data.summary,
+        startTime: data.startTime,
+        endTime: data.endTime,
+      });
+
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${data.googleEventId}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${session.accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        },
+      );
+
+      if (!response.ok) {
+        const responseData = await response.json();
+        logger.error("Failed to update calendar event", {
+          error: responseData,
+          status: response.status,
+          statusText: response.statusText,
+        });
+        return {
+          error:
+            responseData.error?.message || "Failed to update calendar event",
+        };
+      }
+
+      // Update our database record
+      await prisma.calendarEventCreated.updateMany({
+        where: {
+          googleEventId: data.googleEventId,
+          userId: session.user.id,
+        },
+        data: {
+          summary: data.summary,
+          description: data.description,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          timeZone: data.timeZone,
+          attendees: data.attendees || [],
+        },
+      });
+
+      return { success: true, error: "" };
+    } catch (error) {
+      logger.error("Error updating calendar event", {
+        error,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+      });
+      return { error: "Failed to update calendar event" };
     }
   },
 );
