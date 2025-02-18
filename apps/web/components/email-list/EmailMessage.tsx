@@ -120,6 +120,7 @@ export function EmailMessage({
             subject={message.headers.subject}
             content={message.textPlain || message.textHtml || ""}
             onReply={onReply}
+            message={message}
           />
 
           {(showReply || showForward) && (

@@ -3,12 +3,25 @@ import { chatCompletionObject } from "@/utils/llms";
 import type { UserEmailWithAI } from "@/utils/llms/types";
 import { createScopedLogger } from "@/utils/logger";
 import { captureException } from "@/utils/error";
+import { determineTimeContext } from "@/utils/calendar/time-context";
 
 const logger = createScopedLogger("analyze-calendar");
+
+const eventCategorySchema = z.object({
+  category: z.object({
+    primary: z.enum(["meeting", "sports", "meal", "coffee", "other"]),
+    confidence: z.number(),
+  }),
+  timing: z.object({
+    duration: z.number(), // in minutes
+    flexibility: z.enum(["strict", "moderate", "flexible"]),
+  }),
+});
 
 const schema = z.object({
   shouldCreateEvent: z.boolean(),
   confidence: z.number(),
+  eventCategory: eventCategorySchema.optional(),
   suggestedEvent: z
     .object({
       summary: z.string(),
@@ -38,20 +51,23 @@ export async function aiAnalyzeCalendar({
   const system = `You are an AI assistant that analyzes emails to determine if they should be turned into calendar events.
 You should look for:
 1. Meeting requests or scheduling discussions
-2. Deadlines or due dates
-3. Important time-sensitive tasks
-4. Events or appointments
+2. Social activities or sports events
+3. Meals or coffee meetings
+4. Any time-sensitive activities
+
+For each event, classify its type and flexibility:
+- Category: meeting, sports, meal, coffee, or other
+- Flexibility: strict (must be close to proposed time), moderate, or flexible
+- Duration: typical duration in minutes for this type of event
 
 Only suggest creating an event if there's clear time-related content.
-If suggesting an event, try to extract:
+If suggesting an event, extract:
 - A clear title/summary
 - Start and end times if mentioned (use ISO format with timezone)
 - Any mentioned attendees
 - Relevant description from the email
 
-Be conservative - only suggest events when there's high confidence it's appropriate.
-
-The user's timezone is: ${timeZone}`;
+Be conservative - only suggest events when there's high confidence it's appropriate.`;
 
   const prompt = `Analyze this email to determine if it should be turned into a calendar event:
 
@@ -65,18 +81,20 @@ Today's date is: ${today}
 Respond with:
 1. Whether this should be a calendar event
 2. Your confidence level (0-1)
-3. If it should be an event, suggest the event details including:
+3. Event categorization (if applicable):
+   - Category (meeting/sports/meal/coffee/other)
+   - Typical duration for this type of event
+   - How flexible the timing is (strict/moderate/flexible)
+4. If it should be an event, suggest:
    - Summary (clear, concise title)
-   - Description (relevant context from the email)
-   - Start time (in ISO format with timezone)
-   - End time (in ISO format with timezone)
-   - Attendees (email addresses mentioned)
+   - Description (relevant context)
+   - Start time (ISO format with timezone)
+   - End time (ISO format with timezone)
+   - Attendees (email addresses)
 
 Make sure to include the timezone (${timeZone}) in the response.`;
 
   try {
-    logger.trace("Input", { system, prompt });
-
     const response = await chatCompletionObject({
       userAi: user,
       system,
@@ -85,8 +103,6 @@ Make sure to include the timezone (${timeZone}) in the response.`;
       userEmail: user.email || "",
       usageLabel: "Analyze Calendar",
     });
-
-    logger.trace("Output", { response: response.object });
 
     if (!response.object) {
       throw new Error("No response object returned from AI");
@@ -99,11 +115,9 @@ Make sure to include the timezone (${timeZone}) in the response.`;
 
     return response.object;
   } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
     logger.error("AI analysis failed", {
       error,
-      errorMessage,
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
       subject,
       contentLength: content.length,
     });
@@ -113,10 +127,14 @@ Make sure to include the timezone (${timeZone}) in the response.`;
         subject,
         contentLength: content.length,
         userEmail: user.email,
-        errorMessage,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
       },
     });
 
-    throw new Error(`Failed to analyze calendar event: ${errorMessage}`);
+    throw new Error(
+      `Failed to analyze calendar event: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`,
+    );
   }
 }

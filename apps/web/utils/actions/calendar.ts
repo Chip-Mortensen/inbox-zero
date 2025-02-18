@@ -213,6 +213,10 @@ export const getAlternativeTimesAction = withActionInstrumentation(
       "startTime" | "endTime" | "timeZone"
     > & {
       attendees: string[];
+      eventCategory?: {
+        primary: "meeting" | "sports" | "meal" | "coffee" | "other";
+        confidence: number;
+      };
     },
   ): Promise<ServerActionResponse<SuggestTimesResponse>> => {
     const session = await auth();
@@ -227,6 +231,7 @@ export const getAlternativeTimesAction = withActionInstrumentation(
         endTime: data.endTime,
         timeZone: data.timeZone,
         attendees: data.attendees,
+        eventCategory: data.eventCategory,
       });
 
       // Use absolute URL to ensure we're hitting the right endpoint

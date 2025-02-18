@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "lucide-react";
+import { Calendar, XCircle } from "lucide-react";
 import useSWR from "swr";
 import type { AnalyzeCalendarResponse } from "@/app/api/analyze/calendar/route";
 import {
@@ -17,17 +17,20 @@ import { MessageText } from "@/components/Typography";
 import { CalendarConflictAlert } from "./CalendarConflictAlert";
 import type { TimeProposal } from "@/app/api/calendar/suggest-times/route";
 import type { CalendarEvent } from "@/app/api/calendar/check-conflicts/route";
+import type { ParsedMessage } from "@/utils/types";
 
 interface CalendarEventButtonProps {
   subject: string;
   content: string;
   onReply: (draftContent?: string) => void;
+  message: ParsedMessage;
 }
 
 export const CalendarEventButton = ({
   subject,
   content,
   onReply,
+  message,
 }: CalendarEventButtonProps) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isLoadingAlternatives, setIsLoadingAlternatives] = useState(false);
@@ -46,7 +49,9 @@ export const CalendarEventButton = ({
     isLoading,
     error,
   } = useSWR<AnalyzeCalendarResponse>(
-    [`/api/analyze/calendar`, subject, content],
+    message.labelIds?.includes("SENT")
+      ? null
+      : [`/api/analyze/calendar`, subject, content],
     async ([url]) => {
       const response = await fetch(url, {
         method: "POST",
@@ -63,6 +68,8 @@ export const CalendarEventButton = ({
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       dedupingInterval: 60000,
+      suspense: false,
+      keepPreviousData: false,
     },
   );
 
@@ -71,7 +78,8 @@ export const CalendarEventButton = ({
 
     async function checkConflicts() {
       if (
-        !analysis?.suggestedEvent?.startTime ||
+        !analysis?.shouldCreateEvent ||
+        !analysis.suggestedEvent?.startTime ||
         !analysis.suggestedEvent.endTime
       ) {
         return;
@@ -123,6 +131,12 @@ export const CalendarEventButton = ({
             endTime: analysis.suggestedEvent.endTime,
             timeZone: analysis.suggestedEvent.timeZone,
             attendees: analysis.suggestedEvent.attendees || [],
+            eventCategory: analysis.eventCategory?.category
+              ? {
+                  primary: analysis.eventCategory.category.primary,
+                  confidence: analysis.eventCategory.category.confidence,
+                }
+              : undefined,
           });
 
           console.log("🔍 Alternatives result:", {
@@ -308,7 +322,16 @@ export const CalendarEventButton = ({
       );
     }
 
-    if (!analysis?.shouldCreateEvent || !analysis.suggestedEvent) {
+    if (!analysis?.shouldCreateEvent) {
+      return analysis ? (
+        <div className="mt-4 flex items-center gap-2 border-l-2 border-muted pl-3 text-muted-foreground">
+          <XCircle className="h-4 w-4" />
+          <MessageText>No calendar events detected</MessageText>
+        </div>
+      ) : null;
+    }
+
+    if (!analysis.suggestedEvent) {
       return null;
     }
 

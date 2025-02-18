@@ -1,16 +1,25 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { auth } from "@/app/api/auth/[...nextauth]/auth";
 import { withError } from "@/utils/middleware";
 import { createScopedLogger } from "@/utils/logger";
+import {
+  determineTimeContext,
+  isSimilarTimeContext,
+} from "@/utils/calendar/time-context";
 
 const logger = createScopedLogger("calendar-suggestions");
 
 const RequestSchema = z.object({
-  startTime: z.string(), // ISO string
-  endTime: z.string(), // ISO string
+  startTime: z.string(),
+  endTime: z.string(),
   timeZone: z.string(),
   attendees: z.array(z.string()),
+  eventCategory: z
+    .object({
+      primary: z.enum(["meeting", "sports", "meal", "coffee", "other"]),
+      confidence: z.number(),
+    })
+    .optional(),
 });
 
 export type TimeProposal = {
@@ -31,43 +40,53 @@ function generateTimeSlots(
 ): { start: Date; end: Date }[] {
   const duration = originalEnd.getTime() - originalStart.getTime();
   const slots: { start: Date; end: Date }[] = [];
+  const timeContext = determineTimeContext(originalStart);
 
-  // Same day, different times
-  const sameDay = new Date(originalStart);
-  // Try slots between 9 AM and 5 PM
-  for (let hour = 9; hour <= 16; hour++) {
-    sameDay.setHours(hour, 0, 0, 0);
-    const slotEnd = new Date(sameDay.getTime() + duration);
-    // More lenient end time check - allow until 6 PM
-    if (
-      slotEnd.getHours() <= 18 && // End before 6 PM
-      (sameDay.getTime() < originalStart.getTime() ||
-        sameDay.getTime() > originalEnd.getTime())
-    ) {
-      slots.push({
-        start: new Date(sameDay),
-        end: slotEnd,
-      });
-    }
-  }
+  // Generate next 14 days of potential slots
+  const startDate = new Date(originalStart);
+  const endDate = new Date(originalStart);
+  endDate.setDate(endDate.getDate() + 14);
 
-  // Next 5 business days (increased from 3), similar times
-  const nextDays = new Date(originalStart);
-  for (let day = 1; day <= 5; day++) {
-    nextDays.setDate(nextDays.getDate() + 1);
-    // Skip weekends
-    if (nextDays.getDay() === 0 || nextDays.getDay() === 6) {
-      day--;
+  for (
+    let date = new Date(startDate);
+    date <= endDate;
+    date.setDate(date.getDate() + 1)
+  ) {
+    // Skip days that don't match the business/non-business pattern
+    if (!isSimilarTimeContext(date, originalStart)) {
       continue;
     }
-    // Try original time and ±3 hours (increased range)
-    for (let hourOffset = -3; hourOffset <= 3; hourOffset++) {
-      const start = new Date(nextDays);
-      start.setHours(originalStart.getHours() + hourOffset, 0, 0, 0);
-      const end = new Date(start.getTime() + duration);
-      // More lenient time range - 8 AM to 6 PM
-      if (start.getHours() >= 8 && end.getHours() <= 18) {
-        slots.push({ start, end });
+
+    const dayStart = new Date(date);
+    const dayEnd = new Date(date);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    // If business hours, use 9-5 range
+    if (timeContext.isBusinessHours) {
+      dayStart.setHours(9, 0, 0, 0);
+      dayEnd.setHours(17, 0, 0, 0);
+    } else {
+      // For non-business hours, use original time pattern
+      const originalHour = originalStart.getHours();
+      const rangeStart = Math.max(originalHour - 2, 0);
+      const rangeEnd = Math.min(originalHour + 2, 23);
+
+      dayStart.setHours(rangeStart, 0, 0, 0);
+      dayEnd.setHours(rangeEnd, 0, 0, 0);
+    }
+
+    // Generate slots for the day
+    for (
+      let time = dayStart;
+      time <= dayEnd;
+      time.setMinutes(time.getMinutes() + 30)
+    ) {
+      const slotEnd = new Date(time.getTime() + duration);
+      if (slotEnd <= dayEnd) {
+        slots.push({
+          start: new Date(time),
+          end: slotEnd,
+        });
       }
     }
   }
@@ -75,9 +94,38 @@ function generateTimeSlots(
   return slots;
 }
 
+function scoreSlot(
+  slot: Date,
+  originalStart: Date,
+  eventCategory?: { primary: string; confidence: number },
+): number {
+  const dayDiff = Math.abs(slot.getDate() - originalStart.getDate());
+  const hourDiff = Math.abs(slot.getHours() - originalStart.getHours());
+  const isWeekend = [0, 6].includes(slot.getDay());
+
+  let score = 100;
+
+  // Penalize based on day difference
+  score -= dayDiff * 10;
+
+  // Penalize based on time difference
+  score -= hourDiff * 5;
+
+  // Bonus for matching day type (weekend/weekday)
+  if (isWeekend === [0, 6].includes(originalStart.getDay())) {
+    score += 10;
+  }
+
+  // Bonus for common meeting times
+  if (slot.getMinutes() === 0 || slot.getMinutes() === 30) {
+    score += 5;
+  }
+
+  return Math.max(0, Math.min(100, score)) / 100;
+}
+
 export const POST = withError(async (request: Request) => {
   try {
-    // Get access token from Authorization header
     const authHeader = request.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       logger.error("Missing or invalid Authorization header");
@@ -86,9 +134,8 @@ export const POST = withError(async (request: Request) => {
         { status: 401 },
       );
     }
-    const accessToken = authHeader.slice(7); // Remove "Bearer " prefix
+    const accessToken = authHeader.slice(7);
 
-    logger.info("Starting suggest-times request");
     const json = await request.json();
     const result = RequestSchema.safeParse(json);
     if (!result.success) {
@@ -102,20 +149,14 @@ export const POST = withError(async (request: Request) => {
       );
     }
 
-    const { startTime, endTime, timeZone, attendees } = result.data;
-    logger.info("Request parameters", {
-      startTime,
-      endTime,
-      timeZone,
-      numAttendees: attendees.length,
-      attendees,
-    });
-
+    const { startTime, endTime, timeZone, attendees, eventCategory } =
+      result.data;
     const originalStart = new Date(startTime);
     const originalEnd = new Date(endTime);
 
     // Generate potential time slots
     const slots = generateTimeSlots(originalStart, originalEnd, timeZone);
+
     logger.info("Generated time slots", {
       numSlots: slots.length,
       firstSlot: slots[0]
@@ -149,25 +190,13 @@ export const POST = withError(async (request: Request) => {
     for (const slot of slots) {
       try {
         slotsChecked++;
-        logger.info("Checking slot", {
-          slotNumber: slotsChecked,
-          start: slot.start.toISOString(),
-          end: slot.end.toISOString(),
-        });
 
         const freeBusyRequest = {
           timeMin: slot.start.toISOString(),
           timeMax: slot.end.toISOString(),
           timeZone,
-          items: [
-            { id: "primary" }, // Only check our calendar
-          ],
+          items: [{ id: "primary" }],
         };
-
-        logger.info("Sending freeBusy request", {
-          request: freeBusyRequest,
-          accessTokenLength: accessToken.length,
-        });
 
         const freeBusyResponse = await fetch(
           "https://www.googleapis.com/calendar/v3/freeBusy",
@@ -183,29 +212,10 @@ export const POST = withError(async (request: Request) => {
 
         if (!freeBusyResponse.ok) {
           freeBusyErrors++;
-          const errorData = await freeBusyResponse.json();
-          logger.error("Failed to fetch free/busy data", {
-            status: freeBusyResponse.status,
-            statusText: freeBusyResponse.statusText,
-            error: errorData,
-            headers: Object.fromEntries(freeBusyResponse.headers.entries()),
-          });
-
-          // If we get an auth error, return immediately
-          if (freeBusyResponse.status === 401) {
-            return NextResponse.json(
-              { error: "Failed to authenticate with Google Calendar" },
-              { status: 401 },
-            );
-          }
           continue;
         }
 
         const freeBusy = await freeBusyResponse.json();
-        logger.info("FreeBusy response", {
-          hasPrimary: !!freeBusy.calendars.primary,
-          primaryBusyCount: freeBusy.calendars.primary?.busy?.length,
-        });
 
         // Check organizer's availability
         const organizerBusy = freeBusy.calendars.primary?.busy?.some(
@@ -214,45 +224,22 @@ export const POST = withError(async (request: Request) => {
         );
 
         if (organizerBusy) {
-          logger.info("Organizer is busy for slot", {
-            start: slot.start.toISOString(),
-            end: slot.end.toISOString(),
-            busyPeriods: freeBusy.calendars.primary?.busy,
-          });
           slotsSkipped++;
-          continue; // Skip if organizer is busy
+          continue;
         }
 
-        // If we get here, the organizer is available
-        const dayDiff = Math.abs(
-          slot.start.getDate() - originalStart.getDate(),
-        );
-        const timeDiff = Math.abs(
-          slot.start.getHours() - originalStart.getHours(),
-        );
-        // Score based on how close the time is to original
-        const score = 100 - dayDiff * 20 - timeDiff * 5;
+        // Score and add proposal
+        const score = scoreSlot(slot.start, originalStart, eventCategory);
 
         proposals.push({
           startTime: slot.start.toISOString(),
           endTime: slot.end.toISOString(),
-          attendeeAvailability: {}, // Empty since we're not checking attendees
+          attendeeAvailability: {},
           score,
-        });
-
-        logger.info("Added proposal", {
-          start: slot.start.toISOString(),
-          end: slot.end.toISOString(),
-          score,
-          dayDiff,
-          timeDiff,
         });
       } catch (error) {
         logger.error("Error checking slot availability", {
           error,
-          errorMessage:
-            error instanceof Error ? error.message : "Unknown error",
-          stack: error instanceof Error ? error.stack : undefined,
           slot: {
             start: slot.start.toISOString(),
             end: slot.end.toISOString(),
@@ -283,7 +270,6 @@ export const POST = withError(async (request: Request) => {
     logger.error("Fatal error in suggest-times", {
       error,
       errorMessage: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined,
     });
     return NextResponse.json(
       { error: "Failed to suggest alternative times" },
