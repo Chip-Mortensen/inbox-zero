@@ -21,7 +21,19 @@ const eventCategorySchema = z.object({
 const schema = z.object({
   shouldCreateEvent: z.boolean(),
   confidence: z.number(),
-  eventCategory: eventCategorySchema.optional(),
+  eventCategory: z
+    .object({
+      category: z.object({
+        primary: z.enum(["meeting", "sports", "meal", "coffee", "other"]),
+        confidence: z.number(),
+      }),
+      timing: z.object({
+        duration: z.number(),
+        flexibility: z.enum(["strict", "moderate", "flexible"]),
+      }),
+    })
+    .nullable()
+    .optional(),
   suggestedEvent: z
     .object({
       summary: z.string(),

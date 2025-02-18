@@ -286,7 +286,7 @@ export const CalendarEventButton = ({
 
       // Use proper HTML escaping for the link
       const proposalText = `<div>
-        <p>I noticed a scheduling conflict for the proposed time. Would ${proposedDate.toLocaleDateString()} from ${proposedTime} to ${proposedEndTime} work instead?</p>
+        <p>I noticed a scheduling conflict for the proposed time. Would ${proposedDate.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "numeric", day: "numeric" })} from ${proposedTime} to ${proposedEndTime} work instead?</p>
         <p>I've checked my calendar and I'm available during this time slot.</p>
         <p>You can add this event to your calendar using this link: <a href="${calendarLink.replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer">Add to Google Calendar</a></p>
       </div>`;
@@ -380,11 +380,26 @@ export const CalendarEventButton = ({
               <time>
                 {new Date(
                   analysis.suggestedEvent.startTime || new Date(),
-                ).toLocaleString()}
+                ).toLocaleDateString("en-US", {
+                  weekday: "long",
+                  year: "numeric",
+                  month: "numeric",
+                  day: "numeric",
+                })}{" "}
+                at{" "}
+                {new Date(
+                  analysis.suggestedEvent.startTime || new Date(),
+                ).toLocaleTimeString([], {
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
                 {analysis.suggestedEvent.endTime &&
                   ` - ${new Date(
                     analysis.suggestedEvent.endTime,
-                  ).toLocaleTimeString()}`}
+                  ).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}`}
               </time>
             </div>
             {analysis.suggestedEvent.attendees &&
