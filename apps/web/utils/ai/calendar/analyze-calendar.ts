@@ -4,6 +4,7 @@ import type { UserEmailWithAI } from "@/utils/llms/types";
 import { createScopedLogger } from "@/utils/logger";
 import { captureException } from "@/utils/error";
 import { determineTimeContext } from "@/utils/calendar/time-context";
+import { internalDateToDate } from "@/utils/date";
 
 const logger = createScopedLogger("analyze-calendar");
 
@@ -52,13 +53,22 @@ export async function aiAnalyzeCalendar({
   subject,
   content,
   user,
+  message,
 }: {
   subject: string;
   content: string;
   user: UserEmailWithAI;
+  message: {
+    internalDate: string;
+    headers: { from: string; to: string; cc?: string };
+  };
 }): Promise<AnalyzeCalendarResult> {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today = new Date().toLocaleDateString("en-US", { timeZone });
+  const emailDate = internalDateToDate(message.internalDate);
+  const emailDateFormatted = emailDate.toLocaleDateString("en-US", {
+    timeZone,
+  });
 
   const system = `You are an AI assistant that analyzes emails to determine if they should be turned into calendar events.
 You should look for:
@@ -76,8 +86,20 @@ Only suggest creating an event if there's clear time-related content.
 If suggesting an event, extract:
 - A clear title/summary
 - Start and end times if mentioned (use ISO format with timezone)
-- Any mentioned attendees
+- Any mentioned attendees (use actual email addresses from the email)
 - Relevant description from the email
+
+Important context:
+- The email was sent on: ${emailDateFormatted}
+- The current user's email is: ${user.email}
+- The sender's email is: ${message.headers.from}
+- The recipients are: ${message.headers.to}${message.headers.cc ? `, CC: ${message.headers.cc}` : ""}
+
+When suggesting attendees:
+1. Always include the current user (${user.email})
+2. Include the sender's email if they're not the current user
+3. Only include other recipients if they are clearly part of the proposed meeting/event
+4. Never use placeholder emails like unknown@example.com
 
 Be conservative - only suggest events when there's high confidence it's appropriate.`;
 
@@ -88,7 +110,8 @@ Subject: ${subject}
 Content:
 ${content}
 
-Today's date is: ${today}
+Email sent date: ${emailDateFormatted}
+Today's date: ${today}
 
 Respond with:
 1. Whether this should be a calendar event
@@ -102,11 +125,23 @@ Respond with:
    - Description (relevant context)
    - Start time (ISO format with timezone)
    - End time (ISO format with timezone)
-   - Attendees (email addresses)
+   - Attendees (use actual email addresses from the context provided)
 
 Make sure to include the timezone (${timeZone}) in the response.`;
 
   try {
+    logger.info("Sending variables to chatCompletionObject", {
+      userAi: user,
+      system,
+      prompt,
+      schema: schema.toString(),
+      userEmail: user.email || "",
+      usageLabel: "Analyze Calendar",
+      timeZone,
+      subject,
+      contentLength: content.length,
+    });
+
     const response = await chatCompletionObject({
       userAi: user,
       system,

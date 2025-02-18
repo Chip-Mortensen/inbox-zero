@@ -63,7 +63,18 @@ export const CalendarEventButton = ({
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, content }),
+        body: JSON.stringify({
+          subject,
+          content,
+          message: {
+            internalDate: message.internalDate,
+            headers: {
+              from: message.headers.from,
+              to: message.headers.to,
+              cc: message.headers.cc,
+            },
+          },
+        }),
       });
       if (!response.ok) {
         const data = await response.json();

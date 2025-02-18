@@ -12,6 +12,16 @@ const logger = createScopedLogger("calendar-analysis");
 const RequestSchema = z.object({
   subject: z.string(),
   content: z.string(),
+  message: z
+    .object({
+      internalDate: z.union([z.string(), z.number()]).transform(String),
+      headers: z.object({
+        from: z.string(),
+        to: z.string(),
+        cc: z.string().optional(),
+      }),
+    })
+    .optional(),
 });
 
 export type AnalyzeCalendarResponse = AnalyzeCalendarResult;
@@ -32,17 +42,27 @@ export const POST = withError(async (request: Request) => {
       );
     }
 
-    const { subject, content } = result.data;
+    const { subject, content, message: requestMessage } = result.data;
 
     const user = await getAiUserByEmail({ email: session.user.email });
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
+    // Use provided message details if available, otherwise create minimal message object
+    const message = requestMessage || {
+      internalDate: new Date().toISOString(),
+      headers: {
+        from: session.user.email,
+        to: session.user.email,
+      },
+    };
+
     const analysis = await aiAnalyzeCalendar({
       subject,
       content,
       user,
+      message,
     });
 
     return NextResponse.json(analysis);
