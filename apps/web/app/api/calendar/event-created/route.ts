@@ -72,7 +72,7 @@ export const POST = withError(async (request: Request) => {
       googleEventId: eventCreated?.googleEventId,
     });
 
-    // Validate the response
+    // Validate the response if we have an event
     if (eventCreated) {
       const eventResult = EventResponseSchema.safeParse(eventCreated);
       if (!eventResult.success) {
@@ -87,10 +87,22 @@ export const POST = withError(async (request: Request) => {
       }
     }
 
-    return NextResponse.json({
+    const response: EventCreatedResponse = {
       exists: !!eventCreated,
-      event: eventCreated,
-    } satisfies EventCreatedResponse);
+      event: eventCreated
+        ? {
+            summary: eventCreated.summary,
+            description: eventCreated.description,
+            startTime: eventCreated.startTime,
+            endTime: eventCreated.endTime,
+            timeZone: eventCreated.timeZone,
+            attendees: eventCreated.attendees,
+            googleEventId: eventCreated.googleEventId,
+          }
+        : undefined,
+    };
+
+    return NextResponse.json(response);
   } catch (error) {
     logger.error("Error checking calendar event creation", {
       error,
