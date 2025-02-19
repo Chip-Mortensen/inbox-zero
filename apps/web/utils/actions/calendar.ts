@@ -11,6 +11,7 @@ import type {
   SuggestTimesResponse,
 } from "@/app/api/calendar/suggest-times/route";
 import prisma from "@/utils/prisma";
+import { headers } from "next/headers";
 
 const logger = createScopedLogger("calendar");
 
@@ -357,9 +358,13 @@ export const getAlternativeTimesAction = withActionInstrumentation(
         eventCategory: data.eventCategory,
       });
 
-      // Use absolute URL to ensure we're hitting the right endpoint
-      const baseUrl =
-        process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      // Get the request URL from headers
+      const requestHeaders = headers();
+      const requestUrl =
+        requestHeaders.get("x-forwarded-host") || requestHeaders.get("host");
+      const protocol = requestHeaders.get("x-forwarded-proto") || "http";
+      const baseUrl = `${protocol}://${requestUrl}`;
+
       const response = await fetch(`${baseUrl}/api/calendar/suggest-times`, {
         method: "POST",
         headers: {
