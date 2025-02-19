@@ -30,10 +30,18 @@ module.exports = {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: 0 },
         },
+        ellipsis: {
+          "0%": { content: "''" },
+          "25%": { content: "''" },
+          "50%": { content: "'.'" },
+          "75%": { content: "'..'" },
+          "100%": { content: "'...'" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        ellipsis: "ellipsis 1.5s steps(4, end) infinite",
       },
       fontFamily: {
         cal: ["var(--font-cal)", ...fontFamily.sans],

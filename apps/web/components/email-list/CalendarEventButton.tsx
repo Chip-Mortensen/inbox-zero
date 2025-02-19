@@ -993,6 +993,25 @@ export const CalendarEventButton = ({
     );
   };
 
+  if (isLoading) {
+    return (
+      <div className="mt-4 rounded-lg bg-gray-50 p-4">
+        <div className="flex items-center space-x-3">
+          <Calendar className="h-5 w-5 animate-pulse text-gray-400" />
+          <div>
+            <p className="text-sm text-gray-600">
+              Analyzing email for calendar events
+              <span className="after:inline-block after:w-4 after:animate-ellipsis after:text-left" />
+            </p>
+            <p className="text-xs text-gray-400">
+              Checking dates, times and meeting details
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <LoadingContent loading={isLoading} error={error}>
       {renderContent()}
